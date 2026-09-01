@@ -1,0 +1,5 @@
+boutique.db
+__pycache__/
+.venv/
+*.db-journal
+.streamlit/secrets.toml
