@@ -177,7 +177,7 @@ elif page == "Caisse":
                         st.error("Le montant reçu est insuffisant.")
                     else:
                         ticket, saved_gross, saved_total = db.save_sale(st.session_state.mobile_cart, seller_id, client_map[client_name], paid, method, discount)
-                        st.session_state.mobile_receipt = make_receipt(ticket, st.session_state.mobile_cart, seller_name, saved_gross, discount, saved_total, paid, method)
+                        st.session_state.mobile_receipt = make_receipt(ticket, st.session_state.mobile_cart, seller_name, client_name, saved_gross, discount, saved_total, paid, method)
                         st.session_state.mobile_cart = []
                         st.success(f"Vente enregistrée. Monnaie : {fcfa(paid-saved_total)}")
                 if st.button("Vider", icon=":material/delete:"):
