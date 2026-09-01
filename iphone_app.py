@@ -76,7 +76,7 @@ pages = [
 ]
 if is_admin:
     pages += [
-        ("Stock", ":material/inventory_2:"),
+        ("Produits", ":material/inventory_2:"),
         ("Contacts", ":material/contacts:"),
         ("Comptes", ":material/manage_accounts:"),
         ("Rapports", ":material/analytics:"),
@@ -186,9 +186,32 @@ elif page == "Caisse":
     if st.session_state.mobile_receipt:
         st.download_button("Télécharger le ticket", st.session_state.mobile_receipt, file_name="ticket.html", mime="text/html", icon=":material/download:")
 
-elif page == "Stock":
+elif page == "Produits":
     inventory = db.products()
-    st.header("Stock", icon=":material/inventory_2:")
+    st.header("Produits et stock", icon=":material/inventory_2:")
+    suppliers = db.suppliers()
+    supplier_map = {"Sans fournisseur": None} | dict(zip(suppliers.Fournisseur, suppliers.id))
+    with st.expander("Ajouter un produit", icon=":material/add_circle:", expanded=inventory.empty):
+        with st.form("mobile_product"):
+            name = st.text_input("Nom du produit")
+            category = st.text_input("Catégorie", placeholder="Ex. Boissons")
+            purchase = st.number_input("Prix d'achat (FCFA)", min_value=0.0, step=100.0)
+            sale = st.number_input("Prix de vente (FCFA)", min_value=0.0, step=100.0)
+            initial_stock = st.number_input("Quantité initiale", min_value=0, step=1)
+            minimum = st.number_input("Seuil d'alerte", min_value=0, step=1)
+            supplier_name = st.selectbox("Fournisseur", list(supplier_map))
+            if st.form_submit_button("Ajouter le produit", type="primary", icon=":material/add:"):
+                if not name.strip():
+                    st.error("Le nom du produit est obligatoire.")
+                elif sale <= 0:
+                    st.error("Le prix de vente doit être supérieur à zéro.")
+                else:
+                    try:
+                        db.add_product(name, category, purchase, sale, int(initial_stock), int(minimum), supplier_map[supplier_name])
+                        st.success("Produit ajouté.")
+                        st.rerun()
+                    except Exception:
+                        st.error("Ce produit existe déjà. Choisissez un autre nom.")
     st.dataframe(inventory, hide_index=True, column_config={"Achat": st.column_config.NumberColumn(format="%.0f FCFA"), "Vente": st.column_config.NumberColumn(format="%.0f FCFA")})
     if not inventory.empty:
         with st.container(border=True):
