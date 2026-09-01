@@ -273,3 +273,45 @@ elif page == "Rapports":
         st.metric("Dépenses", fcfa(total_expenses))
         st.metric("Solde", fcfa(total_sales-total_expenses))
     st.dataframe(sales, hide_index=True)
+    if not sales.empty:
+        with st.expander("Corriger ou supprimer une vente", icon=":material/edit_note:"):
+            ticket_map = {
+                f"Ticket #{row.Ticket} · {row.Date} · {row.Client} · {fcfa(float(row.Total))}": int(row.Ticket)
+                for _, row in sales.iterrows()
+            }
+            ticket_label = st.selectbox("Vente à gérer", list(ticket_map))
+            sale_id = ticket_map[ticket_label]
+            sale, sale_items = db.sale_details(sale_id)
+            st.dataframe(
+                sale_items,
+                hide_index=True,
+                column_config={"Prix": st.column_config.NumberColumn(format="%.0f FCFA"), "Total": st.column_config.NumberColumn(format="%.0f FCFA")},
+            )
+            clients = db.clients()
+            client_options = {"Vente comptant": None} | dict(zip(clients.Client, clients.id))
+            client_names = list(client_options)
+            selected_client = next((name for name, identifier in client_options.items() if identifier == sale["client_id"]), "Vente comptant")
+            with st.form(f"edit_sale_{sale_id}"):
+                client_name = st.selectbox("Client", client_names, index=client_names.index(selected_client))
+                payment = st.selectbox("Paiement", ["Especes", "Wave", "Orange Money", "Carte"], index=["Especes", "Wave", "Orange Money", "Carte"].index(sale["payment_method"]) if sale["payment_method"] in ["Especes", "Wave", "Orange Money", "Carte"] else 0)
+                paid = st.number_input("Montant encaissé", min_value=0.0, value=float(sale["paid"]), step=100.0)
+                discount = st.number_input("Réduction (FCFA)", min_value=0.0, value=float(sale["discount"]), max_value=float(sale_items.Total.sum()), step=100.0)
+                if st.form_submit_button("Enregistrer la correction", type="primary", icon=":material/save:"):
+                    try:
+                        _, new_total = db.update_sale(sale_id, client_options[client_name], paid, payment, discount)
+                        st.success(f"Vente corrigée. Nouveau total : {fcfa(new_total)}")
+                        st.rerun()
+                    except ValueError as error:
+                        st.error(str(error))
+            st.warning("Supprimer une vente est définitif. Les quantités vendues seront remises en stock.", icon=":material/warning:")
+            confirm_delete = st.checkbox("Je confirme la suppression de cette vente", key=f"confirm_delete_sale_{sale_id}")
+            if st.button("Supprimer définitivement", icon=":material/delete:", key=f"delete_sale_{sale_id}"):
+                if not confirm_delete:
+                    st.error("Cochez la confirmation avant de supprimer la vente.")
+                else:
+                    try:
+                        db.delete_sale(sale_id)
+                        st.success("Vente supprimée et stock restauré.")
+                        st.rerun()
+                    except ValueError as error:
+                        st.error(str(error))

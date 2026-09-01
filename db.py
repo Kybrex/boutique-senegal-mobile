@@ -79,6 +79,35 @@ def save_sale(cart: list[dict], seller_id: int, client_id: int | None, paid: flo
             conn.execute("UPDATE products SET stock=stock-? WHERE id=? AND stock>=?", (item["quantity"], item["id"], item["quantity"]))
         conn.commit()
     return sale_id, gross, total
+def sale_details(sale_id: int) -> tuple[dict, pd.DataFrame] | None:
+    sale = query("SELECT s.id,s.created_at,s.client_id,s.total,s.discount,s.paid,s.payment_method,COALESCE(c.name,'Comptant') AS client FROM sales s LEFT JOIN clients c ON c.id=s.client_id WHERE s.id=?", (sale_id,))
+    if sale.empty:
+        return None
+    items = query("SELECT p.name AS Produit,si.quantity AS Quantite,si.unit_price AS Prix,si.quantity*si.unit_price AS Total FROM sale_items si LEFT JOIN products p ON p.id=si.product_id WHERE si.sale_id=? ORDER BY si.id", (sale_id,))
+    return sale.iloc[0].to_dict(), items
+def update_sale(sale_id: int, client_id: int | None, paid: float, method: str, discount: float) -> tuple[float, float]:
+    if paid < 0:
+        raise ValueError("Le montant encaissé ne peut pas être négatif.")
+    with connection() as conn:
+        exists = conn.execute("SELECT id FROM sales WHERE id=?", (sale_id,)).fetchone()
+        if exists is None:
+            raise ValueError("Vente introuvable.")
+        gross = float(conn.execute("SELECT COALESCE(SUM(quantity*unit_price),0) AS gross FROM sale_items WHERE sale_id=?", (sale_id,)).fetchone()["gross"])
+        discount = max(0, min(float(discount), gross))
+        total = gross - discount
+        conn.execute("UPDATE sales SET client_id=?,paid=?,payment_method=?,discount=?,total=? WHERE id=?", (client_id, paid, method, discount, total, sale_id))
+        conn.commit()
+    return gross, total
+def delete_sale(sale_id: int) -> None:
+    with connection() as conn:
+        items = conn.execute("SELECT product_id,quantity FROM sale_items WHERE sale_id=?", (sale_id,)).fetchall()
+        if conn.execute("SELECT id FROM sales WHERE id=?", (sale_id,)).fetchone() is None:
+            raise ValueError("Vente introuvable.")
+        for item in items:
+            conn.execute("UPDATE products SET stock=stock+? WHERE id=?", (item["quantity"], item["product_id"]))
+        conn.execute("DELETE FROM sale_items WHERE sale_id=?", (sale_id,))
+        conn.execute("DELETE FROM sales WHERE id=?", (sale_id,))
+        conn.commit()
 def add_expense(label: str, amount: float) -> None: execute("INSERT INTO expenses(label,amount) VALUES(?,?)", (label.strip(), amount))
 def products() -> pd.DataFrame: return query("SELECT p.id,p.name AS Produit,p.category AS Categorie,p.purchase_price AS Achat,p.sale_price AS Vente,p.stock AS Stock,p.min_stock AS Minimum,COALESCE(s.name,'') AS Fournisseur FROM products p LEFT JOIN suppliers s ON s.id=p.supplier_id ORDER BY p.name")
 def sellers() -> pd.DataFrame: return query("SELECT id,name AS Vendeur,phone AS Telephone,email AS Email FROM sellers WHERE active=1 ORDER BY name")
