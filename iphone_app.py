@@ -16,6 +16,7 @@ st.set_page_config(page_title="Boutique Senegal Mobile", page_icon=":material/st
 db.init_db()
 st.session_state.setdefault("mobile_cart", [])
 st.session_state.setdefault("mobile_receipt", None)
+st.session_state.setdefault("mobile_page", "Accueil")
 
 
 def fcfa(value: float) -> str:
@@ -69,13 +70,40 @@ is_admin = user["role"] == "admin"
 st.title("Boutique Senegal", icon=":material/storefront:")
 st.caption(f"{user['display_name']} · {'Administrateur' if is_admin else 'Vendeur'}")
 
-pages = ["Accueil", "Caisse"]
+pages = [
+    ("Accueil", ":material/home:"),
+    ("Caisse", ":material/point_of_sale:"),
+]
 if is_admin:
-    pages += ["Stock", "Contacts", "Comptes", "Rapports"]
+    pages += [
+        ("Stock", ":material/inventory_2:"),
+        ("Contacts", ":material/contacts:"),
+        ("Comptes", ":material/manage_accounts:"),
+        ("Rapports", ":material/analytics:"),
+    ]
+
+page_names = [name for name, _ in pages]
+if st.session_state.mobile_page not in page_names:
+    st.session_state.mobile_page = "Accueil"
+
 with st.sidebar:
     st.header("Boutique Senegal")
-    page = st.radio("Navigation", pages, label_visibility="collapsed")
+    st.caption("MENU")
+    with st.container(border=True, gap="small"):
+        for name, icon in pages:
+            if st.button(
+                name,
+                icon=icon,
+                type="primary" if st.session_state.mobile_page == name else "secondary",
+                key=f"mobile_menu_{name}",
+                width="stretch",
+            ):
+                st.session_state.mobile_page = name
+                st.rerun()
+    st.space("small")
     st.button("Se déconnecter", icon=":material/logout:", on_click=sign_out, width="stretch")
+
+page = st.session_state.mobile_page
 
 if page == "Accueil":
     summary = db.today_summary().iloc[0]
