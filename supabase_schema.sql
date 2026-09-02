@@ -137,6 +137,23 @@ alter table store_stock enable row level security;
 alter table stock_transfers enable row level security;
 alter table shop_settings enable row level security;
 
+-- Réaligne les compteurs après une restauration qui conserve les identifiants.
+create or replace function public.sync_boutique_sequences()
+returns void language plpgsql security definer set search_path = public as $$
+declare table_name text; sequence_name text; maximum_id bigint;
+begin
+  foreach table_name in array array['suppliers','sellers','clients','products','users','sales','sale_items','expenses','credit_payments','cash_closings','activity_logs','inventory_counts','stores','stock_transfers'] loop
+    sequence_name := pg_get_serial_sequence('public.' || table_name, 'id');
+    if sequence_name is not null then
+      execute format('select max(id) from public.%I', table_name) into maximum_id;
+      perform setval(sequence_name, coalesce(maximum_id, 1), maximum_id is not null);
+    end if;
+  end loop;
+end;
+$$;
+revoke all on function public.sync_boutique_sequences() from public;
+grant execute on function public.sync_boutique_sequences() to service_role;
+
 -- Demande à l'API Supabase/PostgREST de reconnaître immédiatement les
 -- nouvelles tables et colonnes, sans attendre le rafraîchissement du cache.
 notify pgrst, 'reload schema';
