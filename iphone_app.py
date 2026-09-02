@@ -89,6 +89,7 @@ if "mobile_user" not in st.session_state:
             user = db.authenticate(username, password)
             if user:
                 st.session_state.mobile_user = user
+                st.session_state.mobile_page = "Accueil" if user["role"] == "admin" else "Caisse"
                 st.rerun()
             st.error("Identifiant ou mot de passe incorrect.")
     st.stop()
@@ -98,12 +99,10 @@ is_admin = user["role"] == "admin"
 st.title("Boutique Senegal", icon=":material/storefront:")
 st.caption(f"{user['display_name']} · {'Administrateur' if is_admin else 'Vendeur'}")
 
-pages = [
-    ("Accueil", ":material/home:"),
-    ("Caisse", ":material/point_of_sale:"),
-]
 if is_admin:
-    pages += [
+    pages = [
+        ("Accueil", ":material/home:"),
+        ("Caisse", ":material/point_of_sale:"),
         ("Produits", ":material/inventory_2:"),
         ("Achats", ":material/local_shipping:"),
         ("Contacts", ":material/contacts:"),
@@ -111,10 +110,12 @@ if is_admin:
         ("Comptes", ":material/manage_accounts:"),
         ("Rapports", ":material/analytics:"),
     ]
+else:
+    pages = [("Caisse", ":material/point_of_sale:")]
 
 page_names = [name for name, _ in pages]
 if st.session_state.mobile_page not in page_names:
-    st.session_state.mobile_page = "Accueil"
+    st.session_state.mobile_page = "Accueil" if is_admin else "Caisse"
 
 with st.sidebar:
     st.header("Boutique Senegal")
