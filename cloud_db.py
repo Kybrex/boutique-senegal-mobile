@@ -370,7 +370,7 @@ def dashboard(start,end):
     return {"sales":revenue,"expenses":spent,"gross_profit":profit,"net":revenue-spent,"debt":debt,"transactions":len(sales_df),"performance":perf}
 
 
-BACKUP_TABLES=["suppliers","sellers","clients","stores","products","users","sales","sale_items","expenses","shop_settings","store_stock","credit_payments","cash_closings","inventory_counts","stock_transfers","activity_logs","documents","document_items","purchase_orders","purchase_order_items","supplier_payments","returns","cash_movements","product_lots","offline_imports"]
+BACKUP_TABLES=["suppliers","sellers","clients","stores","products","users","sales","sale_items","expenses","shop_settings","store_stock","credit_payments","cash_closings","inventory_counts","stock_transfers","activity_logs","documents","document_items","purchase_orders","purchase_order_items","supplier_payments","returns","cash_movements","product_lots","offline_imports","product_variants","approval_logs","notification_events","backup_runs"]
 def backup_bundle():
     tables={}
     for table in BACKUP_TABLES:

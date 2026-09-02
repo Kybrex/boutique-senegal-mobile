@@ -116,8 +116,17 @@ def returns_page(user):
     imap={f"{r.Produit} - vendu {int(r.Quantite)}":r for _,r in items.iterrows()}
     with st.form("advanced_return"):
         ilabel=st.selectbox("Produit retourné",list(imap)); item=imap[ilabel]; qty=st.number_input("Quantité",min_value=1,max_value=int(item.Quantite),step=1); reason=st.text_input("Motif du retour"); resolution=st.selectbox("Solution",["REMBOURSEMENT","AVOIR","ECHANGE"],format_func=lambda x:{"REMBOURSEMENT":"Remboursement","AVOIR":"Avoir client","ECHANGE":"Échange"}[x]); method=st.selectbox("Mode de remboursement",["Especes","Wave","Orange Money","Carte"])
+        approval_pin=st.text_input("PIN administrateur requis",type="password",max_chars=4) if user.get("role")=="seller" else ""
         if st.form_submit_button("Valider le retour",type="primary"):
-            refund=v3.process_return(sale_id,int(item.product_id),int(qty),reason,resolution,method,int(user["id"])); db.log_action(int(user["id"]),"RETOUR_AVANCE",f"Ticket #{sale_id} - {resolution} - {refund}"); st.success(f"Retour enregistré. Montant : {fcfa(refund)}"); st.rerun()
+            approved=True
+            if user.get("role")=="seller":
+                try:
+                    import v4_db as v4
+                    approved=v4.v4_ready() and v4.verify_admin_pin(approval_pin,int(user["id"]),"RETOUR_VENDEUR",0,f"Ticket #{sale_id}")
+                except Exception: approved=False
+            if not approved: st.error("PIN administrateur incorrect.")
+            else:
+                refund=v3.process_return(sale_id,int(item.product_id),int(qty),reason,resolution,method,int(user["id"])); db.log_action(int(user["id"]),"RETOUR_AVANCE",f"Ticket #{sale_id} - {resolution} - {refund}"); st.success(f"Retour enregistré. Montant : {fcfa(refund)}"); st.rerun()
     st.subheader("Historique"); st.dataframe(v3.returns_history(),hide_index=True,width="stretch")
 
 

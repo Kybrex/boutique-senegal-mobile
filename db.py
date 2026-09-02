@@ -44,6 +44,10 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS cash_movements (id INTEGER PRIMARY KEY,created_at TEXT DEFAULT CURRENT_TIMESTAMP,movement_date TEXT NOT NULL,movement_type TEXT NOT NULL,amount REAL NOT NULL,label TEXT NOT NULL,recorded_by INTEGER);
         CREATE TABLE IF NOT EXISTS product_lots (id INTEGER PRIMARY KEY,created_at TEXT DEFAULT CURRENT_TIMESTAMP,product_id INTEGER NOT NULL,batch_number TEXT NOT NULL,expiry_date TEXT NOT NULL,quantity INTEGER NOT NULL DEFAULT 0,notes TEXT DEFAULT '',UNIQUE(product_id,batch_number));
         CREATE TABLE IF NOT EXISTS offline_imports (id INTEGER PRIMARY KEY,offline_id TEXT NOT NULL UNIQUE,imported_at TEXT DEFAULT CURRENT_TIMESTAMP,imported_by INTEGER,original_created_at TEXT);
+        CREATE TABLE IF NOT EXISTS product_variants (id INTEGER PRIMARY KEY,product_id INTEGER NOT NULL,name TEXT NOT NULL,sku TEXT DEFAULT '',barcode TEXT,stock INTEGER NOT NULL DEFAULT 0,price_adjustment REAL NOT NULL DEFAULT 0,active INTEGER NOT NULL DEFAULT 1,UNIQUE(product_id,name));
+        CREATE TABLE IF NOT EXISTS approval_logs (id INTEGER PRIMARY KEY,created_at TEXT DEFAULT CURRENT_TIMESTAMP,user_id INTEGER,action TEXT NOT NULL,amount REAL NOT NULL DEFAULT 0,details TEXT DEFAULT '');
+        CREATE TABLE IF NOT EXISTS notification_events (id INTEGER PRIMARY KEY,event_key TEXT NOT NULL UNIQUE,category TEXT NOT NULL,title TEXT NOT NULL,details TEXT DEFAULT '',severity TEXT NOT NULL DEFAULT 'INFO',resolved INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS backup_runs (id INTEGER PRIMARY KEY,created_at TEXT DEFAULT CURRENT_TIMESTAMP,storage_path TEXT DEFAULT '',row_count INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'OK',details TEXT DEFAULT '');
         INSERT OR IGNORE INTO stores(id,name) VALUES(1,'Boutique principale');
         INSERT OR IGNORE INTO shop_settings(id) VALUES(1);
         """)
@@ -63,8 +67,17 @@ def init_db() -> None:
         _column(conn, "users", "can_discount", "INTEGER NOT NULL DEFAULT 0")
         _column(conn, "users", "can_returns", "INTEGER NOT NULL DEFAULT 0")
         _column(conn, "users", "can_credit", "INTEGER NOT NULL DEFAULT 0")
+        _column(conn, "sellers", "commission_rate", "REAL NOT NULL DEFAULT 0")
+        _column(conn, "sales", "commission_amount", "REAL NOT NULL DEFAULT 0")
+        _column(conn, "sales", "store_id", "INTEGER DEFAULT 1")
+        _column(conn, "sale_items", "variant_id", "INTEGER")
+        _column(conn, "users", "store_id", "INTEGER DEFAULT 1")
+        _column(conn, "shop_settings", "admin_pin_hash", "TEXT DEFAULT ''")
+        _column(conn, "shop_settings", "discount_approval_percent", "REAL NOT NULL DEFAULT 10")
+        _column(conn, "shop_settings", "auto_backup_days", "INTEGER NOT NULL DEFAULT 7")
         conn.execute("UPDATE sale_items SET unit_cost=(SELECT purchase_price FROM products WHERE products.id=sale_items.product_id) WHERE unit_cost IS NULL")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS products_barcode_unique ON products(barcode) WHERE barcode IS NOT NULL AND barcode<>''")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS variants_barcode_unique ON product_variants(barcode) WHERE barcode IS NOT NULL AND barcode<>''")
         conn.commit()
 def query(sql: str, params: tuple = ()) -> pd.DataFrame:
     with connection() as conn: return pd.read_sql_query(sql, conn, params=params)
@@ -287,7 +300,7 @@ def dashboard(start: date, end: date) -> dict:
     debt=float(query("SELECT COALESCE(SUM(MAX(total-paid,0)),0) AS d FROM sales").iloc[0].d)
     return {"sales":revenue,"expenses":spent,"gross_profit":profit,"net":revenue-spent,"debt":debt,"transactions":len(sales_df),"performance":perf}
 
-BACKUP_TABLES = ["suppliers","sellers","clients","stores","products","users","sales","sale_items","expenses","shop_settings","store_stock","credit_payments","cash_closings","inventory_counts","stock_transfers","activity_logs","documents","document_items","purchase_orders","purchase_order_items","supplier_payments","returns","cash_movements","product_lots","offline_imports"]
+BACKUP_TABLES = ["suppliers","sellers","clients","stores","products","users","sales","sale_items","expenses","shop_settings","store_stock","credit_payments","cash_closings","inventory_counts","stock_transfers","activity_logs","documents","document_items","purchase_orders","purchase_order_items","supplier_payments","returns","cash_movements","product_lots","offline_imports","product_variants","approval_logs","notification_events","backup_runs"]
 def backup_bundle() -> dict:
     tables = {}
     for table in BACKUP_TABLES:

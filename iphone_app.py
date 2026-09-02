@@ -46,6 +46,8 @@ if secret_error:
 import db
 import v3_db as v3
 import v3_ui
+import v4_db as v4
+import v4_ui
 
 db.init_db()
 st.session_state.setdefault("mobile_cart", [])
@@ -112,6 +114,14 @@ permissions = v3.user_permissions(user)
 st.title("Boutique Senegal", icon=":material/storefront:")
 st.caption(f"{user['display_name']} · {'Administrateur' if is_admin else 'Vendeur'}")
 
+if is_admin and v4.v4_ready() and not st.session_state.get("v4_session_tasks_done"):
+    try:
+        st.session_state.v4_notifications=v4.refresh_notifications()
+        st.session_state.v4_backup_status=v4.automatic_backup_if_due()
+    except Exception as error:
+        st.session_state.v4_backup_status=f"indisponible: {str(error)[:120]}"
+    st.session_state.v4_session_tasks_done=True
+
 if is_admin:
     pages = [
         ("Accueil", ":material/home:"),
@@ -135,6 +145,14 @@ if is_admin:
         ("Lots", ":material/event_busy:"),
         ("Permissions", ":material/admin_panel_settings:"),
         ("Caisse secours", ":material/cloud_off:"),
+        ("Impression", ":material/print:"),
+        ("Recherche", ":material/search:"),
+        ("Importation", ":material/upload_file:"),
+        ("Variantes", ":material/style:"),
+        ("Commissions", ":material/percent:"),
+        ("Approbations", ":material/password:"),
+        ("Automatisation", ":material/notifications_active:"),
+        ("Propriétaire", ":material/leaderboard:"),
     ]
 else:
     pages = [("Caisse", ":material/point_of_sale:")]
@@ -205,6 +223,9 @@ elif page == "Caisse":
         else:
             seller_id = int(user["seller_id"])
             seller_name = user["display_name"]
+        seller_store_id=v4.store_for_seller(seller_id) if v4.v4_ready() else 1
+        if seller_store_id != 1:
+            store_stock=db.store_inventory(seller_store_id); stock_map=dict(zip(store_stock.id,store_stock.Stock)); products=products.copy(); products["Stock"]=products.id.map(lambda identifier:int(stock_map.get(identifier,0)))
         product_map = dict(zip(products.Produit, products.to_dict("records")))
         scanned_name = ""
         if db.v2_ready():
@@ -221,16 +242,26 @@ elif page == "Caisse":
             product_names = list(product_map)
             product_name = st.selectbox("Produit", product_names, index=product_names.index(scanned_name) if scanned_name in product_names else 0)
             product = product_map[product_name]
-            quantity = st.number_input("Quantité", min_value=1, max_value=max(1, int(product["Stock"])), value=1, step=1)
+            variant_row = None
+            product_variants = v4.variants(int(product["id"])) if v4.v4_ready() else pd.DataFrame()
+            active_variants=product_variants[product_variants.Actif.astype(bool)] if not product_variants.empty else product_variants
+            if not active_variants.empty:
+                variant_map={f"{r.Variante} — stock {int(r.Stock)}":r for _,r in active_variants.iterrows()}
+                variant_label=st.selectbox("Variante",list(variant_map)); variant_row=variant_map[variant_label]
+            available_stock=min(int(product["Stock"]),int(variant_row.Stock)) if variant_row is not None else int(product["Stock"])
+            quantity = st.number_input("Quantité", min_value=1, max_value=max(1, available_stock), value=1, step=1)
             if st.form_submit_button("Ajouter au ticket", type="primary"):
-                if int(product["Stock"]) < quantity:
+                if available_stock < quantity:
                     st.error("Stock insuffisant.")
                 else:
-                    line = next((item for item in st.session_state.mobile_cart if item["id"] == product["id"]), None)
+                    variant_id=int(variant_row.id) if variant_row is not None else None
+                    line = next((item for item in st.session_state.mobile_cart if item["id"] == product["id"] and item.get("variant_id")==variant_id), None)
                     if line:
                         line["quantity"] += int(quantity)
                     else:
-                        st.session_state.mobile_cart.append({"id": int(product["id"]), "name": product_name, "quantity": int(quantity), "sale_price": float(product["Vente"])})
+                        item_name=product_name+(f" — {variant_row.Variante}" if variant_row is not None else "")
+                        price=float(product["Vente"])+(float(variant_row.Ajustement_prix) if variant_row is not None else 0)
+                        st.session_state.mobile_cart.append({"id": int(product["id"]), "variant_id":variant_id, "name": item_name, "quantity": int(quantity), "sale_price": price})
                     st.rerun()
         if st.session_state.mobile_cart:
             cart = pd.DataFrame(st.session_state.mobile_cart)
@@ -259,6 +290,10 @@ elif page == "Caisse":
             if due_date:
                 st.info(f"Échéance prévue : {due_date:%d/%m/%Y}")
                 if not credit_ready: st.warning("Exécutez la migration Supabase mise à jour avant d'enregistrer une vente à crédit.")
+            discount_percent=(discount/gross*100) if gross else 0
+            approval=v4.approval_settings() if v4.v4_ready() else {"configured":False,"threshold":101}
+            pin_required=not is_admin and approval["configured"] and discount_percent>=float(approval["threshold"])
+            approval_pin=st.text_input("PIN administrateur requis pour cette remise",type="password",max_chars=4) if pin_required else ""
             with st.container(horizontal=True, horizontal_alignment="distribute"):
                 if st.button("Valider la vente", type="primary", icon=":material/check_circle:"):
                     if is_credit and not permissions["credit"]:
@@ -267,8 +302,11 @@ elif page == "Caisse":
                         st.error("La migration Supabase doit être installée avant les nouvelles échéances de crédit.")
                     elif is_credit and client_map[client_name] is None:
                         st.error("Sélectionnez un client pour une vente à crédit.")
+                    elif pin_required and not v4.verify_admin_pin(approval_pin,int(user["id"]),"REMISE_IMPORTANTE",discount,f"Remise {discount_percent:.1f}%"):
+                        st.error("PIN administrateur incorrect.")
                     else:
-                        ticket, saved_gross, saved_total = db.save_sale(st.session_state.mobile_cart, seller_id, client_map[client_name], paid, method, discount, due_date)
+                        if v4.v4_ready(): ticket, saved_gross, saved_total = v4.atomic_save_sale(st.session_state.mobile_cart, seller_id, client_map[client_name], paid, method, discount, due_date, seller_store_id)
+                        else: ticket, saved_gross, saved_total = db.save_sale(st.session_state.mobile_cart, seller_id, client_map[client_name], paid, method, discount, due_date)
                         settings = db.get_settings() if db.v2_ready() else {}
                         receipt_args = (ticket, st.session_state.mobile_cart, seller_name, client_name, saved_gross, discount, saved_total, paid, method, settings)
                         st.session_state.mobile_receipt = make_receipt(*receipt_args)
@@ -579,6 +617,30 @@ elif page == "Permissions":
 
 elif page == "Caisse secours":
     v3_ui.offline_page(user)
+
+elif page == "Impression":
+    v4_ui.impression_page(user)
+
+elif page == "Recherche":
+    v4_ui.search_page()
+
+elif page == "Importation":
+    v4_ui.import_page(user)
+
+elif page == "Variantes":
+    v4_ui.variants_page(user)
+
+elif page == "Commissions":
+    v4_ui.commissions_page(user)
+
+elif page == "Approbations":
+    v4_ui.approvals_page(user)
+
+elif page == "Automatisation":
+    v4_ui.automation_page(user)
+
+elif page == "Propriétaire":
+    v4_ui.owner_page()
 
 elif page == "Stock":
     v3_ui.stock_readonly_page()

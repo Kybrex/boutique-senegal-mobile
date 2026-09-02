@@ -23,7 +23,7 @@ La version adaptee a l'iPhone est `iphone_app.py` :
 2. Dans Streamlit Community Cloud, choisissez le depot, la branche `main` et le fichier `iphone_app.py`.
 3. Configurez les secrets `SUPABASE_URL` et `SUPABASE_KEY` dans Streamlit Cloud.
 4. Dans Supabase → SQL Editor, exécutez entièrement `supabase_schema.sql`. Le
-   script est réexécutable et ajoute la migration V2 sans effacer les données.
+   script est réexécutable et ajoute les migrations V2, V3 et V4 sans effacer les données.
 5. Redémarrez l'application Streamlit.
 
 ## Modules V2 et V3
@@ -52,3 +52,18 @@ La version adaptee a l'iPhone est `iphone_app.py` :
 - lots et alertes de dates d'expiration ;
 - caisse de secours hors connexion avec import anti-doublon ;
 - liste complète des produits en PDF imprimable.
+
+## Modules V4
+
+- enregistrement atomique des ventes et du stock dans Supabase ;
+- importation en masse des produits, clients et fournisseurs depuis Excel/CSV ;
+- menu Impression : liste produits, étiquettes code-barres, relevés clients et fournisseurs, catalogue prix ;
+- menu Recherche : recherche globale dans les produits, contacts, ventes et documents ;
+- variantes de produits avec SKU, code-barres, prix et stock séparés ;
+- commissions automatiques et rapports par vendeur ;
+- approbation par PIN des remises importantes et retours vendeurs ;
+- prévisions de réapprovisionnement basées sur les ventes des 30 derniers jours ;
+- sauvegardes automatiques privées dans Supabase Storage ;
+- alertes consolidées pour crédits, stocks, lots et commandes fournisseurs ;
+- tableau de bord propriétaire par boutique : ventes, encaissements, créances et valeur du stock ;
+- affectation des comptes vendeurs aux boutiques.
