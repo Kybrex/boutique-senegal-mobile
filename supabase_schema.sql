@@ -136,3 +136,7 @@ alter table stores enable row level security;
 alter table store_stock enable row level security;
 alter table stock_transfers enable row level security;
 alter table shop_settings enable row level security;
+
+-- Demande à l'API Supabase/PostgREST de reconnaître immédiatement les
+-- nouvelles tables et colonnes, sans attendre le rafraîchissement du cache.
+notify pgrst, 'reload schema';
