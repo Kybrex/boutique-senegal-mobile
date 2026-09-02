@@ -201,6 +201,15 @@ def v2_ready() -> bool:
         return False
 
 
+def v2_error() -> str:
+    try:
+        _table("shop_settings").select("id").limit(1).execute()
+        return ""
+    except Exception as error:
+        message = str(error).replace("SUPABASE_KEY", "clé Supabase")
+        return message[:500]
+
+
 def update_product_details(product_id, barcode, photo_url):
     _table("products").update({"barcode": barcode.strip() or None, "photo_url": photo_url.strip()}).eq("id", product_id).execute()
 
