@@ -1,9 +1,10 @@
 """SQLite storage and secure local accounts for Boutique Senegal."""
 from __future__ import annotations
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 import hashlib
 import hmac
+import json
 import os
 import sqlite3
 import pandas as pd
@@ -246,6 +247,32 @@ def dashboard(start: date, end: date) -> dict:
     debt=float(query("SELECT COALESCE(SUM(MAX(total-paid,0)),0) AS d FROM sales").iloc[0].d)
     return {"sales":revenue,"expenses":spent,"gross_profit":profit,"net":revenue-spent,"debt":debt,"transactions":len(sales_df),"performance":perf}
 
+BACKUP_TABLES = ["suppliers","sellers","clients","stores","products","users","sales","sale_items","expenses","shop_settings","store_stock","credit_payments","cash_closings","inventory_counts","stock_transfers","activity_logs"]
+def backup_bundle() -> dict:
+    tables = {}
+    for table in BACKUP_TABLES:
+        frame = query(f"SELECT * FROM {table}")
+        tables[table] = json.loads(frame.to_json(orient="records", date_format="iso"))
+    return {"format":"boutique-senegal-backup","version":2,"created_at":datetime.now(timezone.utc).isoformat(),"tables":tables}
+def restore_backup(bundle: dict) -> dict:
+    if bundle.get("format") != "boutique-senegal-backup" or int(bundle.get("version",0)) != 2: raise ValueError("Fichier de sauvegarde incompatible.")
+    tables=bundle.get("tables");
+    if not isinstance(tables,dict): raise ValueError("Sauvegarde invalide.")
+    restored={}
+    with connection() as conn:
+        for table in BACKUP_TABLES:
+            rows=tables.get(table,[])
+            if not isinstance(rows,list): raise ValueError(f"Données invalides pour {table}.")
+            allowed={row[1] for row in conn.execute(f"PRAGMA table_info({table})")}; count=0
+            for row in rows:
+                values={key:value for key,value in row.items() if key in allowed}
+                if not values: continue
+                columns=list(values); placeholders=",".join("?" for _ in columns)
+                cursor=conn.execute(f"INSERT OR IGNORE INTO {table} ({','.join(columns)}) VALUES ({placeholders})",tuple(values[c] for c in columns)); count += max(0,cursor.rowcount)
+            restored[table]=count
+        conn.commit()
+    return restored
+
 # Sur Streamlit Cloud, les mêmes fonctions utilisent Supabase. En local, SQLite
 # reste disponible sans configuration supplémentaire.
 try:
@@ -280,5 +307,6 @@ try:
         stores = _cloud.stores; add_store = _cloud.add_store; store_inventory = _cloud.store_inventory
         transfer_stock = _cloud.transfer_stock; transfer_history = _cloud.transfer_history
         get_settings = _cloud.get_settings; update_settings = _cloud.update_settings; dashboard = _cloud.dashboard
+        backup_bundle = _cloud.backup_bundle; restore_backup = _cloud.restore_backup
 except Exception:
     pass
