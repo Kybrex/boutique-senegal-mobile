@@ -10,7 +10,11 @@ import streamlit as st
 
 import db
 from receipt import make_receipt
-from supabase_client import configuration_error
+try:
+    from supabase_client import configuration_error
+except ImportError:
+    def configuration_error() -> str:
+        return "La mise à jour Supabase est en cours. Redémarrez l'application dans quelques instants."
 
 
 st.set_page_config(page_title="Boutique Senegal Mobile", page_icon=":material/storefront:", layout="centered")
