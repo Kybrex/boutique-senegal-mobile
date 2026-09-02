@@ -1,7 +1,7 @@
 """Implémentation Supabase de la couche de données Boutique Senegal."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 import pandas as pd
 
 from supabase_client import client, is_configured
@@ -315,3 +315,30 @@ def dashboard(start,end):
     revenue=float(sales_df.Total.sum()) if not sales_df.empty else 0.0; spent=float(expense_df.Montant.sum()) if not expense_df.empty else 0.0; profit=float(perf.Benefice.sum()) if not perf.empty else 0.0
     all_sales=_data(_table("sales").select("total,paid").execute()); debt=sum(max(0,float(r["total"])-float(r["paid"])) for r in all_sales)
     return {"sales":revenue,"expenses":spent,"gross_profit":profit,"net":revenue-spent,"debt":debt,"transactions":len(sales_df),"performance":perf}
+
+
+BACKUP_TABLES=["suppliers","sellers","clients","stores","products","users","sales","sale_items","expenses","shop_settings","store_stock","credit_payments","cash_closings","inventory_counts","stock_transfers","activity_logs"]
+def backup_bundle():
+    return {"format":"boutique-senegal-backup","version":2,"created_at":datetime.now(timezone.utc).isoformat(),"tables":{table:_data(_table(table).select("*").execute()) for table in BACKUP_TABLES}}
+def restore_backup(bundle):
+    if bundle.get("format")!="boutique-senegal-backup" or int(bundle.get("version",0))!=2: raise ValueError("Fichier de sauvegarde incompatible.")
+    tables=bundle.get("tables")
+    if not isinstance(tables,dict): raise ValueError("Sauvegarde invalide.")
+    restored={}; skipped={}
+    for table in BACKUP_TABLES:
+        rows=tables.get(table,[])
+        if not isinstance(rows,list): raise ValueError(f"Données invalides pour {table}.")
+        keys=("store_id","product_id") if table=="store_stock" else ("id",)
+        existing_rows=_data(_table(table).select(",".join(keys)).execute())
+        existing={tuple(row.get(key) for key in keys) for row in existing_rows}; count=0; ignored=0
+        for row in rows:
+            identity=tuple(row.get(key) for key in keys)
+            if identity in existing: ignored+=1; continue
+            try:
+                _table(table).insert(row).execute(); existing.add(identity); count+=1
+            except Exception:
+                ignored+=1
+        restored[table]=count; skipped[table]=ignored
+    try: client().rpc("sync_boutique_sequences").execute()
+    except Exception: pass
+    return {"restored":restored,"skipped":skipped}
