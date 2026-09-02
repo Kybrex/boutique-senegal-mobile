@@ -77,7 +77,9 @@ pages = [
 if is_admin:
     pages += [
         ("Produits", ":material/inventory_2:"),
+        ("Achats", ":material/local_shipping:"),
         ("Contacts", ":material/contacts:"),
+        ("Crédits", ":material/account_balance_wallet:"),
         ("Comptes", ":material/manage_accounts:"),
         ("Rapports", ":material/analytics:"),
     ]
@@ -169,12 +171,12 @@ elif page == "Caisse":
             st.metric("À payer", fcfa(total))
             client_map = {"Vente comptant": None} | dict(zip(clients.Client, clients.id))
             client_name = st.selectbox("Client", list(client_map))
-            method = st.selectbox("Paiement", ["Especes", "Wave", "Orange Money", "Carte"])
+            method = st.selectbox("Paiement", ["Especes", "Wave", "Orange Money", "Carte", "Credit"])
             paid = st.number_input("Montant reçu", min_value=0.0, value=total, step=100.0)
             with st.container(horizontal=True, horizontal_alignment="distribute"):
                 if st.button("Valider la vente", type="primary", icon=":material/check_circle:"):
-                    if paid < total:
-                        st.error("Le montant reçu est insuffisant.")
+                    if paid < total and client_map[client_name] is None:
+                        st.error("Sélectionnez un client pour une vente à crédit.")
                     else:
                         ticket, saved_gross, saved_total = db.save_sale(st.session_state.mobile_cart, seller_id, client_map[client_name], paid, method, discount)
                         st.session_state.mobile_receipt = make_receipt(ticket, st.session_state.mobile_cart, seller_name, client_name, saved_gross, discount, saved_total, paid, method)
@@ -228,6 +230,27 @@ elif page == "Produits":
                 except ValueError as error:
                     st.error(str(error))
 
+elif page == "Achats":
+    st.header("Achats fournisseurs", icon=":material/local_shipping:")
+    inventory = db.products(); suppliers = db.suppliers()
+    if inventory.empty:
+        st.warning("Ajoutez d'abord un produit.")
+    else:
+        product_map = dict(zip(inventory.Produit, inventory.to_dict("records")))
+        supplier_names = ["Sans fournisseur"] + suppliers.Fournisseur.tolist()
+        with st.form("mobile_purchase"):
+            product_name = st.selectbox("Produit reçu", list(product_map))
+            quantity = st.number_input("Quantité reçue", min_value=1, step=1)
+            default_cost = float(product_map[product_name]["Achat"] or 0)
+            unit_cost = st.number_input("Prix d'achat unitaire (FCFA)", min_value=0.0, value=default_cost, step=100.0)
+            supplier_name = st.selectbox("Fournisseur", supplier_names)
+            if st.form_submit_button("Enregistrer la livraison", type="primary", icon=":material/add_business:"):
+                try:
+                    db.register_purchase(int(product_map[product_name]["id"]), int(quantity), float(unit_cost), "" if supplier_name == "Sans fournisseur" else supplier_name)
+                    st.success("Achat enregistré, stock augmenté et dépense ajoutée."); st.rerun()
+                except ValueError as error: st.error(str(error))
+        st.dataframe(db.products(), hide_index=True)
+
 elif page == "Contacts":
     st.header("Clients et fournisseurs", icon=":material/contacts:")
     client_tab, supplier_tab = st.tabs(["Clients", "Fournisseurs"])
@@ -245,6 +268,21 @@ elif page == "Contacts":
                 try: db.add_supplier(name, contact, phone, email, address); st.success("Fournisseur ajouté.")
                 except Exception: st.error("Le nom du fournisseur est obligatoire et doit être unique.")
         st.dataframe(db.suppliers(), hide_index=True)
+
+elif page == "Crédits":
+    st.header("Crédits et historique clients", icon=":material/account_balance_wallet:")
+    customers = db.clients()
+    if customers.empty:
+        st.info("Ajoutez d'abord un client dans Contacts.")
+    else:
+        customer_map = dict(zip(customers.Client, customers.id))
+        customer_name = st.selectbox("Client", list(customer_map))
+        history = db.client_history(int(customer_map[customer_name]))
+        balance = float(history.Reste.sum()) if not history.empty else 0.0
+        st.metric("Dette totale", fcfa(balance))
+        st.dataframe(history, hide_index=True, column_config={"Total": st.column_config.NumberColumn(format="%.0f FCFA"), "Paye": st.column_config.NumberColumn(format="%.0f FCFA"), "Reste": st.column_config.NumberColumn(format="%.0f FCFA")})
+        if not history.empty:
+            st.download_button("Exporter l'historique client", history.to_csv(index=False).encode("utf-8-sig"), file_name=f"historique_{customer_name}.csv", mime="text/csv", icon=":material/download:")
 
 elif page == "Comptes":
     st.header("Vendeurs et comptes", icon=":material/manage_accounts:")
@@ -273,6 +311,25 @@ elif page == "Rapports":
         st.metric("Dépenses", fcfa(total_expenses))
         st.metric("Solde", fcfa(total_sales-total_expenses))
     st.dataframe(sales, hide_index=True)
+    performance = db.product_performance(start, end)
+    if not performance.empty:
+        st.subheader("Bénéfice et produits vendus", icon=":material/trending_up:")
+        st.metric("Bénéfice brut estimé", fcfa(float(performance.Benefice.sum())))
+        st.dataframe(performance, hide_index=True, column_config={"Chiffre": st.column_config.NumberColumn(format="%.0f FCFA"), "Benefice": st.column_config.NumberColumn(format="%.0f FCFA")})
+    with st.expander("Ajouter une dépense", icon=":material/payments:"):
+        with st.form("mobile_expense"):
+            label = st.text_input("Libellé", placeholder="Ex. Transport, loyer, électricité")
+            amount = st.number_input("Montant (FCFA)", min_value=0.0, step=100.0)
+            if st.form_submit_button("Enregistrer la dépense", type="primary"):
+                if not label.strip() or amount <= 0: st.error("Renseignez un libellé et un montant positif.")
+                else: db.add_expense(label, amount); st.success("Dépense enregistrée."); st.rerun()
+    st.subheader("Dépenses")
+    st.dataframe(expenses, hide_index=True)
+    export_sales = sales.to_csv(index=False).encode("utf-8-sig")
+    export_stock = db.products().to_csv(index=False).encode("utf-8-sig")
+    with st.container(horizontal=True):
+        st.download_button("Exporter les ventes", export_sales, file_name=f"ventes_{start}_{end}.csv", mime="text/csv")
+        st.download_button("Exporter le stock", export_stock, file_name="stock.csv", mime="text/csv")
     if not sales.empty:
         with st.expander("Corriger ou supprimer une vente", icon=":material/edit_note:"):
             ticket_map = {
@@ -293,7 +350,8 @@ elif page == "Rapports":
             selected_client = next((name for name, identifier in client_options.items() if identifier == sale["client_id"]), "Vente comptant")
             with st.form(f"edit_sale_{sale_id}"):
                 client_name = st.selectbox("Client", client_names, index=client_names.index(selected_client))
-                payment = st.selectbox("Paiement", ["Especes", "Wave", "Orange Money", "Carte"], index=["Especes", "Wave", "Orange Money", "Carte"].index(sale["payment_method"]) if sale["payment_method"] in ["Especes", "Wave", "Orange Money", "Carte"] else 0)
+                methods = ["Especes", "Wave", "Orange Money", "Carte", "Credit"]
+                payment = st.selectbox("Paiement", methods, index=methods.index(sale["payment_method"]) if sale["payment_method"] in methods else 0)
                 paid = st.number_input("Montant encaissé", min_value=0.0, value=float(sale["paid"]), step=100.0)
                 discount = st.number_input("Réduction (FCFA)", min_value=0.0, value=float(sale["discount"]), max_value=float(sale_items.Total.sum()), step=100.0)
                 if st.form_submit_button("Enregistrer la correction", type="primary", icon=":material/save:"):
@@ -303,6 +361,17 @@ elif page == "Rapports":
                         st.rerun()
                     except ValueError as error:
                         st.error(str(error))
+            if not sale_items.empty:
+                st.subheader("Retour partiel")
+                return_map = {f"{row.Produit} — vendu: {int(row.Quantite)}": row for _, row in sale_items.iterrows()}
+                return_label = st.selectbox("Produit retourné", list(return_map), key=f"return_product_{sale_id}")
+                return_row = return_map[return_label]
+                return_quantity = st.number_input("Quantité retournée", min_value=1, max_value=int(return_row.Quantite), value=1, step=1, key=f"return_qty_{sale_id}")
+                if st.button("Valider le retour", key=f"return_sale_{sale_id}"):
+                    try:
+                        new_total = db.return_sale_item(sale_id, int(return_row.product_id), int(return_quantity))
+                        st.success(f"Retour enregistré, stock restauré. Nouveau total : {fcfa(new_total)}"); st.rerun()
+                    except ValueError as error: st.error(str(error))
             st.warning("Supprimer une vente est définitif. Les quantités vendues seront remises en stock.", icon=":material/warning:")
             confirm_delete = st.checkbox("Je confirme la suppression de cette vente", key=f"confirm_delete_sale_{sale_id}")
             if st.button("Supprimer définitivement", icon=":material/delete:", key=f"delete_sale_{sale_id}"):
