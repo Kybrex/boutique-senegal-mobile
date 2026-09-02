@@ -171,6 +171,7 @@ def expenses(start: date, end: date) -> pd.DataFrame: return query("SELECT creat
 
 # Boutique Senegal V2
 def v2_ready() -> bool: return True
+def v2_error() -> str: return ""
 def update_product_details(product_id: int, barcode: str, photo_url: str) -> None:
     execute("UPDATE products SET barcode=?,photo_url=? WHERE id=?", (barcode.strip() or None, photo_url.strip(), product_id))
 def find_product_by_barcode(barcode: str) -> dict | None:
@@ -269,7 +270,7 @@ try:
         sale_details = _cloud.sale_details; update_sale = _cloud.update_sale; delete_sale = _cloud.delete_sale
         register_purchase = _cloud.register_purchase; client_history = _cloud.client_history
         product_performance = _cloud.product_performance; return_sale_item = _cloud.return_sale_item
-        v2_ready = _cloud.v2_ready; update_product_details = _cloud.update_product_details; find_product_by_barcode = _cloud.find_product_by_barcode
+        v2_ready = _cloud.v2_ready; v2_error = _cloud.v2_error; update_product_details = _cloud.update_product_details; find_product_by_barcode = _cloud.find_product_by_barcode
         add_credit_payment = _cloud.add_credit_payment; credit_payments = _cloud.credit_payments
         cash_summary = _cloud.cash_summary; close_cash = _cloud.close_cash; cash_closings = _cloud.cash_closings
         log_action = _cloud.log_action; audit_logs = _cloud.audit_logs; set_user_active = _cloud.set_user_active
