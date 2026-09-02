@@ -10,9 +10,16 @@ import streamlit as st
 
 import db
 from receipt import make_receipt
+from supabase_client import configuration_error
 
 
 st.set_page_config(page_title="Boutique Senegal Mobile", page_icon=":material/storefront:", layout="centered")
+secret_error = configuration_error()
+if secret_error:
+    st.error("Configuration Supabase à corriger", icon=":material/key:")
+    st.warning(secret_error)
+    st.info("Ouvrez Manage app → Settings → Secrets, remplacez SUPABASE_KEY par la vraie clé secrète Supabase, puis redémarrez l'application.")
+    st.stop()
 db.init_db()
 st.session_state.setdefault("mobile_cart", [])
 st.session_state.setdefault("mobile_receipt", None)
