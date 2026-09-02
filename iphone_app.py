@@ -8,22 +8,39 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-import db
 from receipt import make_receipt
-try:
-    from supabase_client import configuration_error
-except ImportError:
-    def configuration_error() -> str:
-        return "La mise à jour Supabase est en cours. Redémarrez l'application dans quelques instants."
 
 
 st.set_page_config(page_title="Boutique Senegal Mobile", page_icon=":material/storefront:", layout="centered")
-secret_error = configuration_error()
+
+
+def validate_supabase_secrets() -> str | None:
+    url = str(st.secrets.get("SUPABASE_URL", "")).strip()
+    key = str(st.secrets.get("SUPABASE_KEY", "")).strip()
+    if not url and not key:
+        return None
+    if not url or not key:
+        return "SUPABASE_URL et SUPABASE_KEY doivent être renseignés ensemble."
+    if not url.startswith("https://") or ".supabase.co" not in url:
+        return "SUPABASE_URL n'est pas une URL Supabase valide."
+    try:
+        key.encode("ascii")
+    except UnicodeEncodeError:
+        return "SUPABASE_KEY contient des accents ou caractères spéciaux. Remplacez le texte d'exemple par la vraie clé sb_secret_."
+    if "nouvelle" in key.lower() or "votre" in key.lower() or len(key) < 30:
+        return "SUPABASE_KEY est encore un texte d'exemple. Collez la vraie clé sb_secret_ créée dans Supabase."
+    return None
+
+
+secret_error = validate_supabase_secrets()
 if secret_error:
     st.error("Configuration Supabase à corriger", icon=":material/key:")
     st.warning(secret_error)
     st.info("Ouvrez Manage app → Settings → Secrets, remplacez SUPABASE_KEY par la vraie clé secrète Supabase, puis redémarrez l'application.")
     st.stop()
+
+import db
+
 db.init_db()
 st.session_state.setdefault("mobile_cart", [])
 st.session_state.setdefault("mobile_receipt", None)
