@@ -8,7 +8,8 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-from receipt import make_receipt
+from receipt import make_receipt, make_receipt_pdf
+import v2_ui
 
 
 st.set_page_config(page_title="Boutique Senegal Mobile", page_icon=":material/storefront:", layout="centered")
@@ -44,6 +45,8 @@ import db
 db.init_db()
 st.session_state.setdefault("mobile_cart", [])
 st.session_state.setdefault("mobile_receipt", None)
+st.session_state.setdefault("mobile_receipt_pdf", None)
+st.session_state.setdefault("mobile_receipt_info", None)
 st.session_state.setdefault("mobile_page", "Accueil")
 
 
@@ -90,6 +93,10 @@ if "mobile_user" not in st.session_state:
             if user:
                 st.session_state.mobile_user = user
                 st.session_state.mobile_page = "Accueil" if user["role"] == "admin" else "Caisse"
+                try:
+                    if db.v2_ready(): db.log_action(int(user["id"]), "CONNEXION", user["display_name"])
+                except Exception:
+                    pass
                 st.rerun()
             st.error("Identifiant ou mot de passe incorrect.")
     st.stop()
@@ -109,6 +116,12 @@ if is_admin:
         ("Crédits", ":material/account_balance_wallet:"),
         ("Comptes", ":material/manage_accounts:"),
         ("Rapports", ":material/analytics:"),
+        ("Tableau V2", ":material/monitoring:"),
+        ("Clôture", ":material/point_of_sale:"),
+        ("Inventaire", ":material/fact_check:"),
+        ("Boutiques", ":material/store:"),
+        ("Sécurité", ":material/security:"),
+        ("Paramètres", ":material/settings:"),
     ]
 else:
     pages = [("Caisse", ":material/point_of_sale:")]
@@ -169,8 +182,20 @@ elif page == "Caisse":
             seller_id = int(user["seller_id"])
             seller_name = user["display_name"]
         product_map = dict(zip(products.Produit, products.to_dict("records")))
+        scanned_name = ""
+        if db.v2_ready():
+            with st.expander("Scanner un code-barres", icon=":material/barcode_scanner:"):
+                barcode = st.text_input("Code-barres", placeholder="Scannez avec un lecteur ou saisissez le code")
+                camera = st.camera_input("Ou photographiez le code-barres")
+                detected = v2_ui.decode_barcode(camera) if camera else ""
+                lookup = detected or barcode.strip()
+                if lookup:
+                    found = db.find_product_by_barcode(lookup)
+                    if found: scanned_name = found["Produit"]; st.success(f"Produit détecté : {scanned_name}")
+                    else: st.warning("Aucun produit ne correspond à ce code-barres.")
         with st.form("mobile_add_cart"):
-            product_name = st.selectbox("Produit", list(product_map))
+            product_names = list(product_map)
+            product_name = st.selectbox("Produit", product_names, index=product_names.index(scanned_name) if scanned_name in product_names else 0)
             product = product_map[product_name]
             quantity = st.number_input("Quantité", min_value=1, max_value=max(1, int(product["Stock"])), value=1, step=1)
             if st.form_submit_button("Ajouter au ticket", type="primary"):
@@ -189,7 +214,7 @@ elif page == "Caisse":
             st.subheader("Ticket", icon=":material/receipt_long:")
             st.dataframe(cart[["name", "quantity", "Total"]], hide_index=True)
             gross = float(cart.Total.sum())
-            reduction_type = st.segmented_control("Réduction", ["Aucune", "Montant", "Pourcentage"], default="Aucune")
+            reduction_type = st.segmented_control("Réduction", ["Aucune", "Montant", "Pourcentage"], default="Aucune") if is_admin else "Aucune"
             discount = 0.0
             if reduction_type == "Montant":
                 discount = st.number_input("Réduction (FCFA)", min_value=0.0, max_value=gross, step=100.0)
@@ -208,7 +233,17 @@ elif page == "Caisse":
                         st.error("Sélectionnez un client pour une vente à crédit.")
                     else:
                         ticket, saved_gross, saved_total = db.save_sale(st.session_state.mobile_cart, seller_id, client_map[client_name], paid, method, discount)
-                        st.session_state.mobile_receipt = make_receipt(ticket, st.session_state.mobile_cart, seller_name, client_name, saved_gross, discount, saved_total, paid, method)
+                        settings = db.get_settings() if db.v2_ready() else {}
+                        receipt_args = (ticket, st.session_state.mobile_cart, seller_name, client_name, saved_gross, discount, saved_total, paid, method, settings)
+                        st.session_state.mobile_receipt = make_receipt(*receipt_args)
+                        st.session_state.mobile_receipt_pdf = make_receipt_pdf(*receipt_args)
+                        client_phone = ""
+                        if client_map[client_name] is not None and not clients.empty:
+                            client_phone = str(clients.loc[clients.id == client_map[client_name], "Telephone"].iloc[0] or "")
+                        st.session_state.mobile_receipt_info = {"ticket":ticket,"total":saved_total,"phone":client_phone}
+                        try:
+                            if db.v2_ready(): db.log_action(int(user["id"]), "VENTE", f"Ticket #{ticket} - {saved_total} FCFA")
+                        except Exception: pass
                         st.session_state.mobile_cart = []
                         st.success(f"Vente enregistrée. Monnaie : {fcfa(paid-saved_total)}")
                 if st.button("Vider", icon=":material/delete:"):
@@ -216,6 +251,11 @@ elif page == "Caisse":
                     st.rerun()
     if st.session_state.mobile_receipt:
         st.download_button("Télécharger le ticket", st.session_state.mobile_receipt, file_name="ticket.html", mime="text/html", icon=":material/download:")
+        if st.session_state.mobile_receipt_pdf:
+            st.download_button("Télécharger le ticket PDF", st.session_state.mobile_receipt_pdf, file_name="ticket.pdf", mime="application/pdf", icon=":material/picture_as_pdf:")
+        if st.session_state.mobile_receipt_info:
+            info = st.session_state.mobile_receipt_info
+            st.link_button("Partager par WhatsApp", v2_ui.whatsapp_receipt_link(info["phone"], info["ticket"], info["total"]), icon=":material/share:")
 
 elif page == "Produits":
     inventory = db.products()
@@ -258,6 +298,17 @@ elif page == "Produits":
                     st.rerun()
                 except ValueError as error:
                     st.error(str(error))
+        if db.v2_ready():
+            with st.expander("Code-barres et photo du produit", icon=":material/barcode:"):
+                detail_name = st.selectbox("Produit à identifier", inventory.Produit.tolist(), key="detail_product")
+                detail_id = int(inventory.loc[inventory.Produit == detail_name, "id"].iloc[0])
+                with st.form("product_details"):
+                    barcode = st.text_input("Code-barres")
+                    photo_url = st.text_input("Lien de la photo")
+                    if st.form_submit_button("Enregistrer l'identification", type="primary"):
+                        try:
+                            db.update_product_details(detail_id, barcode, photo_url); db.log_action(int(user["id"]), "PRODUIT_IDENTIFIE", detail_name); st.success("Code-barres et photo enregistrés.")
+                        except Exception: st.error("Ce code-barres est déjà utilisé par un autre produit.")
 
 elif page == "Achats":
     st.header("Achats fournisseurs", icon=":material/local_shipping:")
@@ -310,6 +361,20 @@ elif page == "Crédits":
         balance = float(history.Reste.sum()) if not history.empty else 0.0
         st.metric("Dette totale", fcfa(balance))
         st.dataframe(history, hide_index=True, column_config={"Total": st.column_config.NumberColumn(format="%.0f FCFA"), "Paye": st.column_config.NumberColumn(format="%.0f FCFA"), "Reste": st.column_config.NumberColumn(format="%.0f FCFA")})
+        if db.v2_ready() and balance > 0:
+            debts = history[history.Reste > 0]
+            ticket_map = {f"Ticket #{int(row.Ticket)} — reste {fcfa(float(row.Reste))}": row for _, row in debts.iterrows()}
+            with st.form("credit_payment"):
+                ticket_label = st.selectbox("Vente à rembourser", list(ticket_map)); debt_row = ticket_map[ticket_label]
+                amount = st.number_input("Montant du remboursement", min_value=1.0, max_value=float(debt_row.Reste), step=100.0)
+                method = st.selectbox("Mode de règlement", ["Especes", "Wave", "Orange Money", "Carte"])
+                if st.form_submit_button("Enregistrer le remboursement", type="primary"):
+                    try:
+                        db.add_credit_payment(int(customer_map[customer_name]), int(debt_row.Ticket), amount, method, int(user["id"]))
+                        db.log_action(int(user["id"]), "REMBOURSEMENT_CREDIT", f"{customer_name} - ticket #{int(debt_row.Ticket)} - {amount}")
+                        st.success("Remboursement enregistré."); st.rerun()
+                    except ValueError as error: st.error(str(error))
+            st.subheader("Paiements reçus"); st.dataframe(db.credit_payments(int(customer_map[customer_name])), hide_index=True, width="stretch")
         if not history.empty:
             st.download_button("Exporter l'historique client", history.to_csv(index=False).encode("utf-8-sig"), file_name=f"historique_{customer_name}.csv", mime="text/csv", icon=":material/download:")
 
@@ -409,7 +474,26 @@ elif page == "Rapports":
                 else:
                     try:
                         db.delete_sale(sale_id)
+                        if db.v2_ready(): db.log_action(int(user["id"]), "VENTE_SUPPRIMEE", f"Ticket #{sale_id}")
                         st.success("Vente supprimée et stock restauré.")
                         st.rerun()
                     except ValueError as error:
                         st.error(str(error))
+
+elif page == "Tableau V2":
+    v2_ui.dashboard_page()
+
+elif page == "Clôture":
+    v2_ui.cash_page(user)
+
+elif page == "Inventaire":
+    v2_ui.inventory_page(user)
+
+elif page == "Boutiques":
+    v2_ui.stores_page(user)
+
+elif page == "Sécurité":
+    v2_ui.security_page(user)
+
+elif page == "Paramètres":
+    v2_ui.settings_page(user)
