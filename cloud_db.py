@@ -24,8 +24,9 @@ def _table(name: str):
     return client().table(name)
 
 
-def _one(name: str, **filters) -> dict | None:
-    request = _table(name).select("*")
+def _one(table_name: str, **filters) -> dict | None:
+    """Return one row; table_name avoids collisions with a column named name."""
+    request = _table(table_name).select("*")
     for key, value in filters.items(): request = request.eq(key, value)
     rows = _data(request.limit(1).execute())
     return rows[0] if rows else None
