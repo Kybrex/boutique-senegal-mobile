@@ -118,3 +118,28 @@ def low_stock() -> pd.DataFrame: return query("SELECT name AS Produit,stock AS S
 def today_summary() -> pd.DataFrame: return query("SELECT COALESCE(SUM(total),0) AS sales, COUNT(*) AS transactions FROM sales WHERE date(created_at)=?", (date.today().isoformat(),))
 def report(start: date, end: date) -> pd.DataFrame: return query("SELECT s.id AS Ticket,s.created_at AS Date,COALESCE(v.name,'Inconnu') AS Vendeur,COALESCE(c.name,'Comptant') AS Client,s.total AS Total,s.discount AS Reduction,s.paid AS Encaisse,s.payment_method AS Paiement FROM sales s LEFT JOIN sellers v ON v.id=s.seller_id LEFT JOIN clients c ON c.id=s.client_id WHERE date(s.created_at) BETWEEN ? AND ? ORDER BY s.created_at DESC", (start.isoformat(), end.isoformat()))
 def expenses(start: date, end: date) -> pd.DataFrame: return query("SELECT created_at AS Date,label AS Libelle,amount AS Montant FROM expenses WHERE date(created_at) BETWEEN ? AND ? ORDER BY created_at DESC", (start.isoformat(), end.isoformat()))
+
+# Sur Streamlit Cloud, les mêmes fonctions utilisent Supabase. En local, SQLite
+# reste disponible sans configuration supplémentaire.
+try:
+    import cloud_db as _cloud
+    if _cloud.enabled():
+        def init_db() -> None: pass
+        user_count = _cloud.user_count
+        def create_user(username, display_name, password, role, seller_id=None): _cloud.create_user(username.strip().lower(), display_name.strip(), password_hash(password), role, seller_id)
+        def authenticate(username, password):
+            record = _cloud.authenticate(username.strip().lower())
+            if record is None or not valid_password(password, record["password_hash"]): return None
+            record.pop("password_hash", None); return record
+        def add_product(name, category, purchase, sale, stock, minimum, supplier_id): _cloud.add_product(name.strip(), category.strip(), purchase, sale, stock, minimum, supplier_id)
+        set_stock = _cloud.set_stock; adjust_stock = _cloud.adjust_stock
+        def add_seller(name, phone, email): _cloud.add_seller(name.strip(), phone.strip(), email.strip().lower())
+        def create_seller_with_user(name, phone, email, username, password): _cloud.create_seller_with_user(name.strip(), phone.strip(), email.strip().lower(), username.strip().lower(), password_hash(password))
+        def add_supplier(name, contact, phone, email, address): _cloud.add_supplier(name.strip(), contact.strip(), phone.strip(), email.strip().lower(), address.strip())
+        def add_client(name, phone, email, address): _cloud.add_client(name.strip(), phone.strip(), email.strip().lower(), address.strip())
+        save_sale = _cloud.save_sale; add_expense = _cloud.add_expense
+        products = _cloud.products; sellers = _cloud.sellers; suppliers = _cloud.suppliers; clients = _cloud.clients; users = _cloud.users; low_stock = _cloud.low_stock
+        today_summary = _cloud.today_summary; report = _cloud.report; expenses = _cloud.expenses
+        sale_details = _cloud.sale_details; update_sale = _cloud.update_sale; delete_sale = _cloud.delete_sale
+except Exception:
+    pass
