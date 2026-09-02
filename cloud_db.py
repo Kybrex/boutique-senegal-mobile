@@ -15,8 +15,9 @@ def _data(response) -> list[dict]:
     return response.data or []
 
 
-def _frame(rows: list[dict]) -> pd.DataFrame:
-    return pd.DataFrame(rows)
+def _frame(rows: list[dict], columns: list[str] | None = None) -> pd.DataFrame:
+    """Create a DataFrame that keeps its schema even when Supabase returns no rows."""
+    return pd.DataFrame(rows, columns=columns)
 
 
 def _table(name: str):
@@ -71,16 +72,16 @@ def add_client(name, phone, email, address): _table("clients").insert({"name": n
 
 def products() -> pd.DataFrame:
     rows = _data(_table("products").select("*,suppliers(name)").order("name").execute())
-    return _frame([{ "id": r["id"], "Produit": r["name"], "Categorie": r.get("category", ""), "Achat": r["purchase_price"], "Vente": r["sale_price"], "Stock": r["stock"], "Minimum": r["min_stock"], "Fournisseur": (r.get("suppliers") or {}).get("name", "") } for r in rows])
+    return _frame([{ "id": r["id"], "Produit": r["name"], "Categorie": r.get("category", ""), "Achat": r["purchase_price"], "Vente": r["sale_price"], "Stock": r["stock"], "Minimum": r["min_stock"], "Fournisseur": (r.get("suppliers") or {}).get("name", "") } for r in rows], ["id", "Produit", "Categorie", "Achat", "Vente", "Stock", "Minimum", "Fournisseur"])
 def sellers() -> pd.DataFrame:
-    return _frame([{ "id": r["id"], "Vendeur": r["name"], "Telephone": r.get("phone", ""), "Email": r.get("email", "") } for r in _data(_table("sellers").select("*").eq("active", True).order("name").execute())])
+    return _frame([{ "id": r["id"], "Vendeur": r["name"], "Telephone": r.get("phone", ""), "Email": r.get("email", "") } for r in _data(_table("sellers").select("*").eq("active", True).order("name").execute())], ["id", "Vendeur", "Telephone", "Email"])
 def suppliers() -> pd.DataFrame:
-    return _frame([{ "id": r["id"], "Fournisseur": r["name"], "Contact": r.get("contact", ""), "Telephone": r.get("phone", ""), "Email": r.get("email", ""), "Adresse": r.get("address", "") } for r in _data(_table("suppliers").select("*").order("name").execute())])
+    return _frame([{ "id": r["id"], "Fournisseur": r["name"], "Contact": r.get("contact", ""), "Telephone": r.get("phone", ""), "Email": r.get("email", ""), "Adresse": r.get("address", "") } for r in _data(_table("suppliers").select("*").order("name").execute())], ["id", "Fournisseur", "Contact", "Telephone", "Email", "Adresse"])
 def clients() -> pd.DataFrame:
-    return _frame([{ "id": r["id"], "Client": r["name"], "Telephone": r.get("phone", ""), "Email": r.get("email", ""), "Adresse": r.get("address", "") } for r in _data(_table("clients").select("*").order("name").execute())])
+    return _frame([{ "id": r["id"], "Client": r["name"], "Telephone": r.get("phone", ""), "Email": r.get("email", ""), "Adresse": r.get("address", "") } for r in _data(_table("clients").select("*").order("name").execute())], ["id", "Client", "Telephone", "Email", "Adresse"])
 def users() -> pd.DataFrame:
     rows = _data(_table("users").select("*,sellers(name)").eq("active", True).order("role").execute())
-    return _frame([{ "id": r["id"], "Identifiant": r["username"], "Nom": r["display_name"], "Role": r["role"], "Vendeur": (r.get("sellers") or {}).get("name", "") } for r in rows])
+    return _frame([{ "id": r["id"], "Identifiant": r["username"], "Nom": r["display_name"], "Role": r["role"], "Vendeur": (r.get("sellers") or {}).get("name", "") } for r in rows], ["id", "Identifiant", "Nom", "Role", "Vendeur"])
 def low_stock() -> pd.DataFrame:
     return _frame([{ "Produit": r["name"], "Stock": r["stock"], "Minimum": r["min_stock"] } for r in _data(_table("products").select("*").execute()) if int(r["stock"]) <= int(r["min_stock"])])
 
