@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from io import BytesIO
+import json
 from pathlib import Path
 from urllib.parse import quote
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -173,12 +174,49 @@ def settings_page(user: dict) -> None:
             db.update_settings(name,phone,address,logo,footer); db.log_action(int(user["id"]),"PARAMETRES_MODIFIES",name); st.success("Paramètres enregistrés."); st.rerun()
     st.subheader("Sauvegarde complète")
     if st.button("Préparer la sauvegarde"):
+        bundle=db.backup_bundle()
         files={"produits.csv":db.products(),"clients.csv":db.clients(),"fournisseurs.csv":db.suppliers(),"utilisateurs.csv":db.all_users(),"ventes.csv":db.report(date(2000,1,1),date.today()),"depenses.csv":db.expenses(date(2000,1,1),date.today()),"inventaires.csv":db.inventory_history(),"transferts.csv":db.transfer_history(),"journal.csv":db.audit_logs()}
         output=BytesIO()
         with ZipFile(output,"w",ZIP_DEFLATED) as archive:
             for filename,frame in files.items(): archive.writestr(filename,frame.to_csv(index=False).encode("utf-8-sig"))
-            archive.writestr("supabase_schema.sql","Utilisez le fichier supabase_schema.sql du dépôt GitHub pour restaurer la structure.")
+            archive.writestr("boutique_backup.json",json.dumps(bundle,ensure_ascii=False,indent=2,default=str).encode("utf-8"))
+            archive.writestr("supabase_schema.sql",(Path(__file__).parent/"supabase_schema.sql").read_bytes())
         st.download_button("Télécharger la sauvegarde ZIP",output.getvalue(),file_name=f"boutique_senegal_{date.today()}.zip",mime="application/zip")
+        st.warning("Cette sauvegarde contient les comptes et leurs mots de passe chiffrés. Conservez-la dans un endroit privé.")
+
+    st.subheader("Restaurer une sauvegarde")
+    st.caption("La restauration fusionne uniquement les enregistrements manquants. Elle ne supprime et n'écrase aucune donnée existante.")
+    uploaded=st.file_uploader("Sauvegarde Boutique Sénégal (.zip ou .json)",type=["zip","json"])
+    bundle=None
+    if uploaded is not None:
+        try:
+            if uploaded.name.lower().endswith(".zip"):
+                with ZipFile(BytesIO(uploaded.getvalue())) as archive:
+                    bundle=json.loads(archive.read("boutique_backup.json").decode("utf-8"))
+            else:
+                bundle=json.loads(uploaded.getvalue().decode("utf-8"))
+            if bundle.get("format")!="boutique-senegal-backup" or int(bundle.get("version",0))!=2: raise ValueError("format")
+            counts={table:len(rows) for table,rows in bundle.get("tables",{}).items()}
+            st.success(f"Sauvegarde valide du {bundle.get('created_at','date inconnue')}")
+            st.dataframe(pd.DataFrame([{"Table":table,"Enregistrements":count} for table,count in counts.items()]),hide_index=True,width="stretch")
+        except Exception:
+            bundle=None; st.error("Ce fichier n'est pas une sauvegarde Boutique Sénégal V2 valide.")
+    if bundle is not None:
+        with st.form("restore_backup"):
+            password=st.text_input("Mot de passe administrateur",type="password")
+            confirmed=st.checkbox("Je confirme la restauration des données manquantes")
+            if st.form_submit_button("Restaurer les données",type="primary"):
+                authenticated=db.authenticate(str(user["username"]),password)
+                if not authenticated: st.error("Mot de passe administrateur incorrect.")
+                elif not confirmed: st.error("Cochez la confirmation avant de restaurer.")
+                else:
+                    try:
+                        result=db.restore_backup(bundle)
+                        restored=result.get("restored",result); total=sum(int(value) for value in restored.values())
+                        db.log_action(int(user["id"]),"RESTAURATION",f"{total} enregistrements restaurés")
+                        st.success(f"Restauration terminée : {total} enregistrements manquants récupérés.")
+                    except ValueError as error: st.error(str(error))
+                    except Exception as error: st.error(f"Restauration interrompue : {error}")
 
 
 def whatsapp_receipt_link(phone: str, ticket: int, total: float) -> str:
