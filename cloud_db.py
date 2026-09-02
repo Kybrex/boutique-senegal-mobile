@@ -84,7 +84,7 @@ def sellers() -> pd.DataFrame:
 def suppliers() -> pd.DataFrame:
     return _frame([{ "id": r["id"], "Fournisseur": r["name"], "Contact": r.get("contact", ""), "Telephone": r.get("phone", ""), "Email": r.get("email", ""), "Adresse": r.get("address", "") } for r in _data(_table("suppliers").select("*").order("name").execute())], ["id", "Fournisseur", "Contact", "Telephone", "Email", "Adresse"])
 def clients() -> pd.DataFrame:
-    return _frame([{ "id": r["id"], "Client": r["name"], "Telephone": r.get("phone", ""), "Email": r.get("email", ""), "Adresse": r.get("address", "") } for r in _data(_table("clients").select("*").order("name").execute())], ["id", "Client", "Telephone", "Email", "Adresse"])
+    return _frame([{ "id": r["id"], "Client": r["name"], "Telephone": r.get("phone", ""), "Email": r.get("email", ""), "Adresse": r.get("address", ""), "Points":r.get("loyalty_points",0), "Avoir":r.get("store_credit",0) } for r in _data(_table("clients").select("*").order("name").execute())], ["id", "Client", "Telephone", "Email", "Adresse", "Points", "Avoir"])
 def users() -> pd.DataFrame:
     rows = _data(_table("users").select("*,sellers(name)").eq("active", True).order("role").execute())
     return _frame([{ "id": r["id"], "Identifiant": r["username"], "Nom": r["display_name"], "Role": r["role"], "Vendeur": (r.get("sellers") or {}).get("name", "") } for r in rows], ["id", "Identifiant", "Nom", "Role", "Vendeur"])
@@ -94,15 +94,24 @@ def low_stock() -> pd.DataFrame:
 
 def save_sale(cart, seller_id, client_id, paid, method, discount, due_date=None):
     gross = sum(item["quantity"] * item["sale_price"] for item in cart); discount = max(0, min(discount, gross)); total = gross - discount
+    product_rows = {}
     for item in cart:
         product = _one("products", id=item["id"])
         if product is None or int(product["stock"]) < int(item["quantity"]): raise ValueError("Stock insuffisant.")
+        product_rows[item["id"]] = product
     payload = {"seller_id": seller_id, "client_id": client_id, "total": total, "discount": discount, "paid": paid, "payment_method": method}
     if due_date is not None: payload["due_date"] = due_date.isoformat() if hasattr(due_date, "isoformat") else str(due_date)
     sale = _data(_table("sales").insert(payload).execute())[0]
     for item in cart:
-        _table("sale_items").insert({"sale_id": sale["id"], "product_id": item["id"], "quantity": item["quantity"], "unit_price": item["sale_price"]}).execute()
+        item_payload={"sale_id": sale["id"], "product_id": item["id"], "quantity": item["quantity"], "unit_price": item["sale_price"], "unit_cost":product_rows[item["id"]].get("purchase_price",0)}
+        try: _table("sale_items").insert(item_payload).execute()
+        except Exception:
+            item_payload.pop("unit_cost",None); _table("sale_items").insert(item_payload).execute()
         adjust_stock(item["id"], -int(item["quantity"]))
+    if client_id and paid > 0:
+        try:
+            client_row=_one("clients",id=client_id); _table("clients").update({"loyalty_points":int(client_row.get("loyalty_points") or 0)+int(float(paid)//1000)}).eq("id",client_id).execute()
+        except Exception: pass
     return int(sale["id"]), gross, total
 
 
@@ -136,14 +145,16 @@ def product_performance(start, end):
     sales = {r["id"]: r for r in _data(_table("sales").select("id,created_at").execute()) if start.isoformat() <= r["created_at"][:10] <= end.isoformat()}
     products = {r["id"]: r for r in _data(_table("products").select("id,name,purchase_price").execute())}
     totals = {}
-    for item in _data(_table("sale_items").select("sale_id,product_id,quantity,unit_price").execute()):
+    try: item_rows=_data(_table("sale_items").select("sale_id,product_id,quantity,unit_price,unit_cost").execute())
+    except Exception: item_rows=_data(_table("sale_items").select("sale_id,product_id,quantity,unit_price").execute())
+    for item in item_rows:
         if item["sale_id"] not in sales:
             continue
         product = products.get(item["product_id"], {"name": "Produit supprimé", "purchase_price": 0})
         row = totals.setdefault(item["product_id"], {"Produit": product["name"], "Quantite": 0, "Chiffre": 0.0, "Benefice": 0.0})
         quantity = int(item["quantity"]); revenue = quantity * float(item["unit_price"])
         row["Quantite"] += quantity; row["Chiffre"] += revenue
-        row["Benefice"] += revenue - quantity * float(product.get("purchase_price") or 0)
+        row["Benefice"] += revenue - quantity * float(item.get("unit_cost") if item.get("unit_cost") is not None else (product.get("purchase_price") or 0))
     return _frame(sorted(totals.values(), key=lambda r: r["Chiffre"], reverse=True))
 def today_summary() -> pd.DataFrame:
     rows = _data(_table("sales").select("total,created_at").execute()); today = date.today().isoformat(); values = [float(r["total"]) for r in rows if r["created_at"].startswith(today)]
@@ -286,8 +297,9 @@ def cash_summary(day, seller_id=None):
     return _frame(list(totals.values()), ["Paiement","Transactions","Montant"])
 
 
-def close_cash(day, seller_id, counted, notes, user_id):
+def close_cash(day, seller_id, counted, notes, user_id, expected_override=None):
     summary = cash_summary(day,seller_id); expected=float(summary.loc[summary.Paiement=="Especes","Montant"].sum()) if not summary.empty else 0.0
+    if expected_override is not None: expected=float(expected_override)
     _table("cash_closings").insert({"closing_date":day.isoformat(),"seller_id":seller_id,"expected_cash":expected,"counted_cash":counted,"difference":counted-expected,"notes":notes.strip(),"closed_by":user_id}).execute()
 
 
@@ -309,7 +321,7 @@ def set_user_active(user_id, active): _table("users").update({"active":active}).
 def reset_user_password(user_id, password_hash): _table("users").update({"password_hash":password_hash}).eq("id",user_id).execute()
 def all_users():
     rows=_data(_table("users").select("*").order("role").execute())
-    return _frame([{"id":r["id"],"Identifiant":r["username"],"Nom":r["display_name"],"Role":r["role"],"Actif":r["active"]} for r in rows], ["id","Identifiant","Nom","Role","Actif"])
+    return _frame([{"id":r["id"],"Identifiant":r["username"],"Nom":r["display_name"],"Role":r["role"],"Actif":r["active"],"Stock":r.get("can_view_stock",False),"Remises":r.get("can_discount",False),"Retours":r.get("can_returns",False),"Credits":r.get("can_credit",False)} for r in rows], ["id","Identifiant","Nom","Role","Actif","Stock","Remises","Retours","Credits"])
 
 
 def inventory_snapshot():
@@ -358,9 +370,13 @@ def dashboard(start,end):
     return {"sales":revenue,"expenses":spent,"gross_profit":profit,"net":revenue-spent,"debt":debt,"transactions":len(sales_df),"performance":perf}
 
 
-BACKUP_TABLES=["suppliers","sellers","clients","stores","products","users","sales","sale_items","expenses","shop_settings","store_stock","credit_payments","cash_closings","inventory_counts","stock_transfers","activity_logs"]
+BACKUP_TABLES=["suppliers","sellers","clients","stores","products","users","sales","sale_items","expenses","shop_settings","store_stock","credit_payments","cash_closings","inventory_counts","stock_transfers","activity_logs","documents","document_items","purchase_orders","purchase_order_items","supplier_payments","returns","cash_movements","product_lots","offline_imports"]
 def backup_bundle():
-    return {"format":"boutique-senegal-backup","version":2,"created_at":datetime.now(timezone.utc).isoformat(),"tables":{table:_data(_table(table).select("*").execute()) for table in BACKUP_TABLES}}
+    tables={}
+    for table in BACKUP_TABLES:
+        try: tables[table]=_data(_table(table).select("*").execute())
+        except Exception: continue
+    return {"format":"boutique-senegal-backup","version":2,"created_at":datetime.now(timezone.utc).isoformat(),"tables":tables}
 def restore_backup(bundle):
     if bundle.get("format")!="boutique-senegal-backup" or int(bundle.get("version",0))!=2: raise ValueError("Fichier de sauvegarde incompatible.")
     tables=bundle.get("tables")
@@ -370,7 +386,8 @@ def restore_backup(bundle):
         rows=tables.get(table,[])
         if not isinstance(rows,list): raise ValueError(f"Données invalides pour {table}.")
         keys=("store_id","product_id") if table=="store_stock" else ("id",)
-        existing_rows=_data(_table(table).select(",".join(keys)).execute())
+        try: existing_rows=_data(_table(table).select(",".join(keys)).execute())
+        except Exception: continue
         existing={tuple(row.get(key) for key in keys) for row in existing_rows}; count=0; ignored=0
         for row in rows:
             identity=tuple(row.get(key) for key in keys)

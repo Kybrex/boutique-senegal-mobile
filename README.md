@@ -26,7 +26,7 @@ La version adaptee a l'iPhone est `iphone_app.py` :
    script est réexécutable et ajoute la migration V2 sans effacer les données.
 5. Redémarrez l'application Streamlit.
 
-## Modules V2
+## Modules V2 et V3
 
 - remboursements et historique des crédits clients ;
 - clôture quotidienne par vendeur et par mode de paiement ;
@@ -41,3 +41,14 @@ La version adaptee a l'iPhone est `iphone_app.py` :
 - échéances de crédits avec alertes automatiques à J-5, 24 h et après retard ;
 - fiche d'inventaire PDF A4 prête à imprimer et remplir ;
 - photos de produits importées depuis la galerie ou l'appareil photo du téléphone.
+- rappels WhatsApp des crédits avec message prérempli ;
+- devis, factures, bons de livraison et bons de commande PDF ;
+- commandes fournisseurs, réceptions partielles et règlements ;
+- retours avec remboursement, avoir ou échange ;
+- fonds initial, entrées et sorties de caisse ;
+- bénéfice historique basé sur le coût au moment de la vente ;
+- points de fidélité et avoirs clients ;
+- permissions détaillées par vendeur ;
+- lots et alertes de dates d'expiration ;
+- caisse de secours hors connexion avec import anti-doublon ;
+- liste complète des produits en PDF imprimable.

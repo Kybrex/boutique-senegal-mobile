@@ -35,6 +35,15 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS store_stock (store_id INTEGER NOT NULL, product_id INTEGER NOT NULL, stock INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(store_id,product_id));
         CREATE TABLE IF NOT EXISTS stock_transfers (id INTEGER PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP, product_id INTEGER NOT NULL, from_store_id INTEGER NOT NULL, to_store_id INTEGER NOT NULL, quantity INTEGER NOT NULL, transferred_by INTEGER, notes TEXT DEFAULT '');
         CREATE TABLE IF NOT EXISTS shop_settings (id INTEGER PRIMARY KEY CHECK(id=1), shop_name TEXT NOT NULL DEFAULT 'Boutique Senegal', phone TEXT DEFAULT '', address TEXT DEFAULT '', logo_url TEXT DEFAULT '', receipt_footer TEXT DEFAULT 'Merci pour votre achat !', currency TEXT DEFAULT 'FCFA');
+        CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY,created_at TEXT DEFAULT CURRENT_TIMESTAMP,document_type TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'BROUILLON',client_id INTEGER,valid_until TEXT,notes TEXT DEFAULT '',total REAL NOT NULL DEFAULT 0,created_by INTEGER);
+        CREATE TABLE IF NOT EXISTS document_items (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity INTEGER NOT NULL,unit_price REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS purchase_orders (id INTEGER PRIMARY KEY,created_at TEXT DEFAULT CURRENT_TIMESTAMP,supplier_id INTEGER NOT NULL,expected_date TEXT,notes TEXT DEFAULT '',total REAL NOT NULL DEFAULT 0,paid REAL NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'COMMANDÉE',created_by INTEGER);
+        CREATE TABLE IF NOT EXISTS purchase_order_items (id INTEGER PRIMARY KEY,purchase_order_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity INTEGER NOT NULL,received_quantity INTEGER NOT NULL DEFAULT 0,unit_cost REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS supplier_payments (id INTEGER PRIMARY KEY,created_at TEXT DEFAULT CURRENT_TIMESTAMP,purchase_order_id INTEGER NOT NULL,amount REAL NOT NULL,payment_method TEXT NOT NULL,recorded_by INTEGER);
+        CREATE TABLE IF NOT EXISTS returns (id INTEGER PRIMARY KEY,created_at TEXT DEFAULT CURRENT_TIMESTAMP,sale_id INTEGER NOT NULL,product_id INTEGER NOT NULL,quantity INTEGER NOT NULL,reason TEXT DEFAULT '',resolution TEXT NOT NULL,refund_method TEXT DEFAULT '',refund_amount REAL NOT NULL DEFAULT 0,processed_by INTEGER);
+        CREATE TABLE IF NOT EXISTS cash_movements (id INTEGER PRIMARY KEY,created_at TEXT DEFAULT CURRENT_TIMESTAMP,movement_date TEXT NOT NULL,movement_type TEXT NOT NULL,amount REAL NOT NULL,label TEXT NOT NULL,recorded_by INTEGER);
+        CREATE TABLE IF NOT EXISTS product_lots (id INTEGER PRIMARY KEY,created_at TEXT DEFAULT CURRENT_TIMESTAMP,product_id INTEGER NOT NULL,batch_number TEXT NOT NULL,expiry_date TEXT NOT NULL,quantity INTEGER NOT NULL DEFAULT 0,notes TEXT DEFAULT '',UNIQUE(product_id,batch_number));
+        CREATE TABLE IF NOT EXISTS offline_imports (id INTEGER PRIMARY KEY,offline_id TEXT NOT NULL UNIQUE,imported_at TEXT DEFAULT CURRENT_TIMESTAMP,imported_by INTEGER,original_created_at TEXT);
         INSERT OR IGNORE INTO stores(id,name) VALUES(1,'Boutique principale');
         INSERT OR IGNORE INTO shop_settings(id) VALUES(1);
         """)
@@ -47,6 +56,14 @@ def init_db() -> None:
         _column(conn, "products", "barcode", "TEXT")
         _column(conn, "products", "photo_url", "TEXT DEFAULT ''")
         _column(conn, "sales", "due_date", "TEXT")
+        _column(conn, "sale_items", "unit_cost", "REAL")
+        _column(conn, "clients", "loyalty_points", "INTEGER NOT NULL DEFAULT 0")
+        _column(conn, "clients", "store_credit", "REAL NOT NULL DEFAULT 0")
+        _column(conn, "users", "can_view_stock", "INTEGER NOT NULL DEFAULT 0")
+        _column(conn, "users", "can_discount", "INTEGER NOT NULL DEFAULT 0")
+        _column(conn, "users", "can_returns", "INTEGER NOT NULL DEFAULT 0")
+        _column(conn, "users", "can_credit", "INTEGER NOT NULL DEFAULT 0")
+        conn.execute("UPDATE sale_items SET unit_cost=(SELECT purchase_price FROM products WHERE products.id=sale_items.product_id) WHERE unit_cost IS NULL")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS products_barcode_unique ON products(barcode) WHERE barcode IS NOT NULL AND barcode<>''")
         conn.commit()
 def query(sql: str, params: tuple = ()) -> pd.DataFrame:
@@ -65,7 +82,7 @@ def user_count() -> int: return int(query("SELECT COUNT(*) AS c FROM users").ilo
 def create_user(username: str, display_name: str, password: str, role: str, seller_id: int | None = None) -> None:
     execute("INSERT INTO users(username,display_name,password_hash,role,seller_id) VALUES(?,?,?,?,?)", (username.strip().lower(), display_name.strip(), password_hash(password), role, seller_id))
 def authenticate(username: str, password: str) -> dict | None:
-    users = query("SELECT id,username,display_name,password_hash,role,seller_id FROM users WHERE username=? AND active=1", (username.strip().lower(),))
+    users = query("SELECT id,username,display_name,password_hash,role,seller_id,can_view_stock,can_discount,can_returns,can_credit FROM users WHERE username=? AND active=1", (username.strip().lower(),))
     if users.empty or not valid_password(password, users.iloc[0].password_hash): return None
     return users.drop(columns="password_hash").iloc[0].to_dict()
 def add_product(name: str, category: str, purchase: float, sale: float, stock: int, minimum: int, supplier_id: int | None) -> None:
@@ -96,10 +113,12 @@ def save_sale(cart: list[dict], seller_id: int, client_id: int | None, paid: flo
         due_value = due_date.isoformat() if hasattr(due_date, "isoformat") else due_date
         cursor = conn.execute("INSERT INTO sales(seller_id,client_id,total,discount,paid,payment_method,due_date) VALUES(?,?,?,?,?,?,?)", (seller_id, client_id, total, discount, paid, method, due_value)); sale_id = cursor.lastrowid
         for item in cart:
-            conn.execute("INSERT INTO sale_items(sale_id,product_id,quantity,unit_price) VALUES(?,?,?,?)", (sale_id, item["id"], item["quantity"], item["sale_price"]))
+            cost=float(conn.execute("SELECT purchase_price FROM products WHERE id=?",(item["id"],)).fetchone()["purchase_price"] or 0)
+            conn.execute("INSERT INTO sale_items(sale_id,product_id,quantity,unit_price,unit_cost) VALUES(?,?,?,?,?)", (sale_id, item["id"], item["quantity"], item["sale_price"],cost))
             conn.execute("UPDATE products SET stock=stock-? WHERE id=? AND stock>=?", (item["quantity"], item["id"], item["quantity"]))
             current = conn.execute("SELECT stock FROM products WHERE id=?", (item["id"],)).fetchone()["stock"]
             conn.execute("INSERT INTO store_stock(store_id,product_id,stock) VALUES(1,?,?) ON CONFLICT(store_id,product_id) DO UPDATE SET stock=excluded.stock", (item["id"],current))
+        if client_id and paid>0: conn.execute("UPDATE clients SET loyalty_points=loyalty_points+? WHERE id=?",(int(float(paid)//1000),client_id))
         conn.commit()
     return sale_id, gross, total
 def sale_details(sale_id: int) -> tuple[dict, pd.DataFrame] | None:
@@ -162,11 +181,11 @@ def register_purchase(product_id: int, quantity: int, unit_cost: float, supplier
 def client_history(client_id: int) -> pd.DataFrame:
     return query("SELECT id AS Ticket,created_at AS Date,total AS Total,paid AS Paye,MAX(total-paid,0) AS Reste,payment_method AS Paiement,COALESCE(due_date,'') AS Echeance FROM sales WHERE client_id=? ORDER BY created_at DESC", (client_id,))
 def product_performance(start: date, end: date) -> pd.DataFrame:
-    return query("SELECT p.name AS Produit,SUM(si.quantity) AS Quantite,SUM(si.quantity*si.unit_price) AS Chiffre,SUM(si.quantity*(si.unit_price-p.purchase_price)) AS Benefice FROM sale_items si JOIN sales s ON s.id=si.sale_id LEFT JOIN products p ON p.id=si.product_id WHERE date(s.created_at) BETWEEN ? AND ? GROUP BY si.product_id,p.name ORDER BY Chiffre DESC", (start.isoformat(), end.isoformat()))
+    return query("SELECT p.name AS Produit,SUM(si.quantity) AS Quantite,SUM(si.quantity*si.unit_price) AS Chiffre,SUM(si.quantity*(si.unit_price-COALESCE(si.unit_cost,p.purchase_price,0))) AS Benefice FROM sale_items si JOIN sales s ON s.id=si.sale_id LEFT JOIN products p ON p.id=si.product_id WHERE date(s.created_at) BETWEEN ? AND ? GROUP BY si.product_id,p.name ORDER BY Chiffre DESC", (start.isoformat(), end.isoformat()))
 def products() -> pd.DataFrame: return query("SELECT p.id,p.name AS Produit,p.category AS Categorie,p.purchase_price AS Achat,p.sale_price AS Vente,p.stock AS Stock,p.min_stock AS Minimum,COALESCE(s.name,'') AS Fournisseur,COALESCE(p.barcode,'') AS Code_barres,COALESCE(p.photo_url,'') AS Photo FROM products p LEFT JOIN suppliers s ON s.id=p.supplier_id ORDER BY p.name")
 def sellers() -> pd.DataFrame: return query("SELECT id,name AS Vendeur,phone AS Telephone,email AS Email FROM sellers WHERE active=1 ORDER BY name")
 def suppliers() -> pd.DataFrame: return query("SELECT id,name AS Fournisseur,contact AS Contact,phone AS Telephone,email AS Email,address AS Adresse FROM suppliers ORDER BY name")
-def clients() -> pd.DataFrame: return query("SELECT id,name AS Client,phone AS Telephone,email AS Email,address AS Adresse FROM clients ORDER BY name")
+def clients() -> pd.DataFrame: return query("SELECT id,name AS Client,phone AS Telephone,email AS Email,address AS Adresse,loyalty_points AS Points,store_credit AS Avoir FROM clients ORDER BY name")
 def users() -> pd.DataFrame: return query("SELECT u.id,u.username AS Identifiant,u.display_name AS Nom,u.role AS Role,COALESCE(s.name,'') AS Vendeur FROM users u LEFT JOIN sellers s ON s.id=u.seller_id WHERE u.active=1 ORDER BY u.role,u.display_name")
 def low_stock() -> pd.DataFrame: return query("SELECT name AS Produit,stock AS Stock,min_stock AS Minimum FROM products WHERE stock<=min_stock ORDER BY stock")
 def today_summary() -> pd.DataFrame: return query("SELECT COALESCE(SUM(total),0) AS sales, COUNT(*) AS transactions FROM sales WHERE date(created_at)=?", (date.today().isoformat(),))
@@ -214,8 +233,9 @@ def cash_summary(day: date, seller_id: int | None = None) -> pd.DataFrame:
     params: tuple = (day.isoformat(),)
     if seller_id is not None: sql += " AND seller_id=?"; params += (seller_id,)
     return query(sql+" GROUP BY payment_method ORDER BY payment_method", params)
-def close_cash(day: date, seller_id: int | None, counted: float, notes: str, user_id: int) -> None:
+def close_cash(day: date, seller_id: int | None, counted: float, notes: str, user_id: int, expected_override=None) -> None:
     summary = cash_summary(day, seller_id); expected = float(summary.loc[summary.Paiement == "Especes", "Montant"].sum()) if not summary.empty else 0.0
+    if expected_override is not None: expected=float(expected_override)
     execute("INSERT INTO cash_closings(closing_date,seller_id,expected_cash,counted_cash,difference,notes,closed_by) VALUES(?,?,?,?,?,?,?)", (day.isoformat(),seller_id,expected,counted,counted-expected,notes.strip(),user_id))
 def cash_closings() -> pd.DataFrame:
     return query("SELECT c.closing_date AS Date,COALESCE(s.name,'Tous') AS Vendeur,c.expected_cash AS Attendu,c.counted_cash AS Compte,c.difference AS Ecart,c.notes AS Notes FROM cash_closings c LEFT JOIN sellers s ON s.id=c.seller_id ORDER BY c.created_at DESC LIMIT 100")
@@ -225,7 +245,7 @@ def audit_logs() -> pd.DataFrame:
     return query("SELECT l.created_at AS Date,COALESCE(u.display_name,'Systeme') AS Utilisateur,l.action AS Action,l.details AS Details FROM activity_logs l LEFT JOIN users u ON u.id=l.user_id ORDER BY l.created_at DESC LIMIT 300")
 def set_user_active(user_id: int, active: bool) -> None: execute("UPDATE users SET active=? WHERE id=? AND role<>'admin'", (int(active),user_id))
 def reset_user_password(user_id: int, password: str) -> None: execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash(password),user_id))
-def all_users() -> pd.DataFrame: return query("SELECT id,username AS Identifiant,display_name AS Nom,role AS Role,active AS Actif FROM users ORDER BY role,display_name")
+def all_users() -> pd.DataFrame: return query("SELECT id,username AS Identifiant,display_name AS Nom,role AS Role,active AS Actif,can_view_stock AS Stock,can_discount AS Remises,can_returns AS Retours,can_credit AS Credits FROM users ORDER BY role,display_name")
 def inventory_snapshot() -> pd.DataFrame: return query("SELECT id,name AS Produit,COALESCE(category,'') AS Categorie,stock AS Stock,COALESCE(barcode,'') AS Code_barres FROM products ORDER BY name")
 def save_inventory_count(product_id: int, counted: int, user_id: int, notes: str = "") -> None:
     if counted < 0: raise ValueError("Le stock compté ne peut pas être négatif.")
@@ -267,7 +287,7 @@ def dashboard(start: date, end: date) -> dict:
     debt=float(query("SELECT COALESCE(SUM(MAX(total-paid,0)),0) AS d FROM sales").iloc[0].d)
     return {"sales":revenue,"expenses":spent,"gross_profit":profit,"net":revenue-spent,"debt":debt,"transactions":len(sales_df),"performance":perf}
 
-BACKUP_TABLES = ["suppliers","sellers","clients","stores","products","users","sales","sale_items","expenses","shop_settings","store_stock","credit_payments","cash_closings","inventory_counts","stock_transfers","activity_logs"]
+BACKUP_TABLES = ["suppliers","sellers","clients","stores","products","users","sales","sale_items","expenses","shop_settings","store_stock","credit_payments","cash_closings","inventory_counts","stock_transfers","activity_logs","documents","document_items","purchase_orders","purchase_order_items","supplier_payments","returns","cash_movements","product_lots","offline_imports"]
 def backup_bundle() -> dict:
     tables = {}
     for table in BACKUP_TABLES:

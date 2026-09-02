@@ -12,6 +12,8 @@ import pandas as pd
 import streamlit as st
 
 import db
+import v3_db as v3
+import v3_ui
 from receipt import make_inventory_pdf
 
 
@@ -84,15 +86,16 @@ def cash_page(user: dict) -> None:
     seller_name = st.selectbox("Vendeur", list(seller_map)); seller_id = seller_map[seller_name]
     summary = db.cash_summary(day, None if seller_id is None else int(seller_id))
     st.dataframe(summary, hide_index=True, width="stretch")
-    expected = float(summary.loc[summary.Paiement == "Especes", "Montant"].sum()) if not summary.empty else 0.0
+    expected = (float(summary.loc[summary.Paiement == "Especes", "Montant"].sum()) if not summary.empty else 0.0) + (v3.cash_adjustment(day) if v3.v3_ready() else 0.0)
     st.metric("Espèces attendues", fcfa(expected))
     with st.form("cash_closing"):
         counted = st.number_input("Espèces réellement comptées", min_value=0.0, step=500.0)
         notes = st.text_area("Observations")
         if st.form_submit_button("Clôturer la caisse", type="primary"):
-            db.close_cash(day, None if seller_id is None else int(seller_id), counted, notes, int(user["id"]))
+            db.close_cash(day, None if seller_id is None else int(seller_id), counted, notes, int(user["id"]), expected)
             db.log_action(int(user["id"]), "CLOTURE_CAISSE", f"{day} - {seller_name} - écart {counted-expected}")
             st.success(f"Caisse clôturée. Écart : {fcfa(counted-expected)}"); st.rerun()
+    if v3.v3_ready(): v3_ui.cash_movements_section(user,day)
     st.subheader("Historique des clôtures"); st.dataframe(db.cash_closings(), hide_index=True, width="stretch")
 
 

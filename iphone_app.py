@@ -16,8 +16,11 @@ st.set_page_config(page_title="Boutique Senegal Mobile", page_icon=":material/st
 
 
 def validate_supabase_secrets() -> str | None:
-    url = str(st.secrets.get("SUPABASE_URL", "")).strip()
-    key = str(st.secrets.get("SUPABASE_KEY", "")).strip()
+    try:
+        url = str(st.secrets.get("SUPABASE_URL", "")).strip()
+        key = str(st.secrets.get("SUPABASE_KEY", "")).strip()
+    except Exception:
+        return None
     if not url and not key:
         return None
     if not url or not key:
@@ -41,6 +44,8 @@ if secret_error:
     st.stop()
 
 import db
+import v3_db as v3
+import v3_ui
 
 db.init_db()
 st.session_state.setdefault("mobile_cart", [])
@@ -103,6 +108,7 @@ if "mobile_user" not in st.session_state:
 
 user = st.session_state.mobile_user
 is_admin = user["role"] == "admin"
+permissions = v3.user_permissions(user)
 st.title("Boutique Senegal", icon=":material/storefront:")
 st.caption(f"{user['display_name']} · {'Administrateur' if is_admin else 'Vendeur'}")
 
@@ -122,9 +128,18 @@ if is_admin:
         ("Boutiques", ":material/store:"),
         ("Sécurité", ":material/security:"),
         ("Paramètres", ":material/settings:"),
+        ("Documents", ":material/description:"),
+        ("Commandes", ":material/inventory:"),
+        ("Retours V3", ":material/assignment_return:"),
+        ("Fidélité", ":material/loyalty:"),
+        ("Lots", ":material/event_busy:"),
+        ("Permissions", ":material/admin_panel_settings:"),
+        ("Caisse secours", ":material/cloud_off:"),
     ]
 else:
     pages = [("Caisse", ":material/point_of_sale:")]
+    if permissions["stock"]: pages.append(("Stock", ":material/inventory_2:"))
+    if permissions["returns"] and v3.v3_ready(): pages.append(("Retours V3", ":material/assignment_return:"))
 
 page_names = [name for name, _ in pages]
 if st.session_state.mobile_page not in page_names:
@@ -167,6 +182,10 @@ if page == "Accueil":
         st.subheader("Échéances de crédits", icon=":material/notifications_active:")
         if credit_alerts.empty: st.success("Aucune échéance dans les 5 prochains jours.")
         else: st.dataframe(credit_alerts, hide_index=True, column_config={"Reste": st.column_config.NumberColumn(format="%.0f FCFA")}, width="stretch")
+    if v3.v3_ready():
+        expiry=v3.expiry_alerts()
+        if not expiry.empty:
+            st.subheader("Lots à surveiller",icon=":material/event_busy:"); st.dataframe(expiry,hide_index=True,width="stretch")
 
 elif page == "Caisse":
     products = db.products()
@@ -219,7 +238,7 @@ elif page == "Caisse":
             st.subheader("Ticket", icon=":material/receipt_long:")
             st.dataframe(cart[["name", "quantity", "Total"]], hide_index=True)
             gross = float(cart.Total.sum())
-            reduction_type = st.segmented_control("Réduction", ["Aucune", "Montant", "Pourcentage"], default="Aucune") if is_admin else "Aucune"
+            reduction_type = st.segmented_control("Réduction", ["Aucune", "Montant", "Pourcentage"], default="Aucune") if permissions["discount"] else "Aucune"
             discount = 0.0
             if reduction_type == "Montant":
                 discount = st.number_input("Réduction (FCFA)", min_value=0.0, max_value=gross, step=100.0)
@@ -230,7 +249,8 @@ elif page == "Caisse":
             st.metric("À payer", fcfa(total))
             client_map = {"Vente comptant": None} | dict(zip(clients.Client, clients.id))
             client_name = st.selectbox("Client", list(client_map))
-            method = st.selectbox("Paiement", ["Especes", "Wave", "Orange Money", "Carte", "Credit"])
+            payment_methods = ["Especes", "Wave", "Orange Money", "Carte"] + (["Credit"] if permissions["credit"] else [])
+            method = st.selectbox("Paiement", payment_methods)
             paid = st.number_input("Montant reçu", min_value=0.0, value=total, step=100.0)
             is_credit = method == "Credit" or paid < total
             credit_days = st.number_input("Durée du crédit (jours)", min_value=1, value=30, step=1) if is_credit else 0
@@ -241,7 +261,9 @@ elif page == "Caisse":
                 if not credit_ready: st.warning("Exécutez la migration Supabase mise à jour avant d'enregistrer une vente à crédit.")
             with st.container(horizontal=True, horizontal_alignment="distribute"):
                 if st.button("Valider la vente", type="primary", icon=":material/check_circle:"):
-                    if is_credit and not credit_ready:
+                    if is_credit and not permissions["credit"]:
+                        st.error("Ce compte vendeur n'est pas autorisé à faire une vente à crédit.")
+                    elif is_credit and not credit_ready:
                         st.error("La migration Supabase doit être installée avant les nouvelles échéances de crédit.")
                     elif is_credit and client_map[client_name] is None:
                         st.error("Sélectionnez un client pour une vente à crédit.")
@@ -297,7 +319,8 @@ elif page == "Produits":
                         st.rerun()
                     except Exception:
                         st.error("Ce produit existe déjà. Choisissez un autre nom.")
-    st.dataframe(inventory, hide_index=True, column_config={"Achat": st.column_config.NumberColumn(format="%.0f FCFA"), "Vente": st.column_config.NumberColumn(format="%.0f FCFA")})
+    v3_ui.product_list_download(inventory)
+    st.dataframe(inventory, hide_index=True, column_config={"Achat": st.column_config.NumberColumn(format="%.0f FCFA"), "Vente": st.column_config.NumberColumn(format="%.0f FCFA"), "Photo":st.column_config.ImageColumn("Photo")})
     if not inventory.empty:
         with st.container(border=True):
             product_name = st.selectbox("Produit à modifier", inventory.Produit.tolist())
@@ -380,6 +403,7 @@ elif page == "Crédits":
         else:
             st.warning(f"{len(alerts)} crédit(s) nécessitent votre attention.", icon=":material/notifications_active:")
             st.dataframe(alerts, hide_index=True, column_config={"Reste": st.column_config.NumberColumn(format="%.0f FCFA")}, width="stretch")
+            reminder_labels={f"{r.Client} - ticket #{int(r.Ticket)} - {r.Statut}":r for _,r in alerts.iterrows()}; reminder_label=st.selectbox("Rappel WhatsApp",list(reminder_labels)); st.link_button("Envoyer le rappel WhatsApp",v3_ui.credit_reminder_link(reminder_labels[reminder_label]),icon=":material/send:",width="stretch")
     customers = db.clients()
     if customers.empty:
         st.info("Ajoutez d'abord un client dans Contacts.")
@@ -534,3 +558,27 @@ elif page == "Sécurité":
 
 elif page == "Paramètres":
     v2_ui.settings_page(user)
+
+elif page == "Documents":
+    v3_ui.documents_page(user)
+
+elif page == "Commandes":
+    v3_ui.purchase_orders_page(user)
+
+elif page == "Retours V3":
+    v3_ui.returns_page(user)
+
+elif page == "Fidélité":
+    v3_ui.loyalty_page(user)
+
+elif page == "Lots":
+    v3_ui.lots_page(user)
+
+elif page == "Permissions":
+    v3_ui.permissions_page(user)
+
+elif page == "Caisse secours":
+    v3_ui.offline_page(user)
+
+elif page == "Stock":
+    v3_ui.stock_readonly_page()
