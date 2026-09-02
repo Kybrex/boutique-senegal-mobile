@@ -22,6 +22,9 @@ def migration_required() -> bool:
         return False
     st.error("La migration Supabase V2 doit être installée avant d'utiliser ce module.")
     st.info("Dans Supabase → SQL Editor, exécutez le fichier supabase_schema.sql mis à jour, puis redémarrez l'application.")
+    error = db.v2_error()
+    if error:
+        st.warning(f"Diagnostic Supabase : {error}")
     sql = (Path(__file__).parent / "supabase_schema.sql").read_text(encoding="utf-8")
     st.download_button("Télécharger la migration V2", sql, file_name="boutique_senegal_v2.sql", mime="text/sql")
     with st.expander("Afficher le code SQL à copier"):
