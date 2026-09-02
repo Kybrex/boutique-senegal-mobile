@@ -83,7 +83,7 @@ def sale_details(sale_id: int) -> tuple[dict, pd.DataFrame] | None:
     sale = query("SELECT s.id,s.created_at,s.client_id,s.total,s.discount,s.paid,s.payment_method,COALESCE(c.name,'Comptant') AS client FROM sales s LEFT JOIN clients c ON c.id=s.client_id WHERE s.id=?", (sale_id,))
     if sale.empty:
         return None
-    items = query("SELECT p.name AS Produit,si.quantity AS Quantite,si.unit_price AS Prix,si.quantity*si.unit_price AS Total FROM sale_items si LEFT JOIN products p ON p.id=si.product_id WHERE si.sale_id=? ORDER BY si.id", (sale_id,))
+    items = query("SELECT si.product_id,p.name AS Produit,si.quantity AS Quantite,si.unit_price AS Prix,si.quantity*si.unit_price AS Total FROM sale_items si LEFT JOIN products p ON p.id=si.product_id WHERE si.sale_id=? ORDER BY si.id", (sale_id,))
     return sale.iloc[0].to_dict(), items
 def update_sale(sale_id: int, client_id: int | None, paid: float, method: str, discount: float) -> tuple[float, float]:
     if paid < 0:
@@ -108,7 +108,32 @@ def delete_sale(sale_id: int) -> None:
         conn.execute("DELETE FROM sale_items WHERE sale_id=?", (sale_id,))
         conn.execute("DELETE FROM sales WHERE id=?", (sale_id,))
         conn.commit()
+def return_sale_item(sale_id: int, product_id: int, quantity: int) -> float:
+    with connection() as conn:
+        item = conn.execute("SELECT id,quantity FROM sale_items WHERE sale_id=? AND product_id=?", (sale_id, product_id)).fetchone()
+        if item is None or quantity <= 0 or quantity > item["quantity"]: raise ValueError("Quantité retournée invalide.")
+        remaining = item["quantity"] - quantity
+        if remaining: conn.execute("UPDATE sale_items SET quantity=? WHERE id=?", (remaining, item["id"]))
+        else: conn.execute("DELETE FROM sale_items WHERE id=?", (item["id"],))
+        conn.execute("UPDATE products SET stock=stock+? WHERE id=?", (quantity, product_id))
+        gross = float(conn.execute("SELECT COALESCE(SUM(quantity*unit_price),0) AS gross FROM sale_items WHERE sale_id=?", (sale_id,)).fetchone()["gross"])
+        sale = conn.execute("SELECT discount,paid FROM sales WHERE id=?", (sale_id,)).fetchone()
+        discount = min(float(sale["discount"]), gross); total = gross-discount; paid = min(float(sale["paid"]), total)
+        conn.execute("UPDATE sales SET total=?,discount=?,paid=? WHERE id=?", (total, discount, paid, sale_id)); conn.commit()
+        return total
 def add_expense(label: str, amount: float) -> None: execute("INSERT INTO expenses(label,amount) VALUES(?,?)", (label.strip(), amount))
+def register_purchase(product_id: int, quantity: int, unit_cost: float, supplier_name: str = "") -> None:
+    if quantity <= 0 or unit_cost < 0: raise ValueError("Quantité ou prix d'achat invalide.")
+    with connection() as conn:
+        product = conn.execute("SELECT name FROM products WHERE id=?", (product_id,)).fetchone()
+        if product is None: raise ValueError("Produit introuvable.")
+        conn.execute("UPDATE products SET stock=stock+?,purchase_price=? WHERE id=?", (quantity, unit_cost, product_id))
+        label = f"Achat stock - {product['name']} x{quantity}" + (f" - {supplier_name}" if supplier_name else "")
+        conn.execute("INSERT INTO expenses(label,amount) VALUES(?,?)", (label, quantity*unit_cost)); conn.commit()
+def client_history(client_id: int) -> pd.DataFrame:
+    return query("SELECT id AS Ticket,created_at AS Date,total AS Total,paid AS Paye,MAX(total-paid,0) AS Reste,payment_method AS Paiement FROM sales WHERE client_id=? ORDER BY created_at DESC", (client_id,))
+def product_performance(start: date, end: date) -> pd.DataFrame:
+    return query("SELECT p.name AS Produit,SUM(si.quantity) AS Quantite,SUM(si.quantity*si.unit_price) AS Chiffre,SUM(si.quantity*(si.unit_price-p.purchase_price)) AS Benefice FROM sale_items si JOIN sales s ON s.id=si.sale_id LEFT JOIN products p ON p.id=si.product_id WHERE date(s.created_at) BETWEEN ? AND ? GROUP BY si.product_id,p.name ORDER BY Chiffre DESC", (start.isoformat(), end.isoformat()))
 def products() -> pd.DataFrame: return query("SELECT p.id,p.name AS Produit,p.category AS Categorie,p.purchase_price AS Achat,p.sale_price AS Vente,p.stock AS Stock,p.min_stock AS Minimum,COALESCE(s.name,'') AS Fournisseur FROM products p LEFT JOIN suppliers s ON s.id=p.supplier_id ORDER BY p.name")
 def sellers() -> pd.DataFrame: return query("SELECT id,name AS Vendeur,phone AS Telephone,email AS Email FROM sellers WHERE active=1 ORDER BY name")
 def suppliers() -> pd.DataFrame: return query("SELECT id,name AS Fournisseur,contact AS Contact,phone AS Telephone,email AS Email,address AS Adresse FROM suppliers ORDER BY name")
@@ -141,5 +166,7 @@ try:
         products = _cloud.products; sellers = _cloud.sellers; suppliers = _cloud.suppliers; clients = _cloud.clients; users = _cloud.users; low_stock = _cloud.low_stock
         today_summary = _cloud.today_summary; report = _cloud.report; expenses = _cloud.expenses
         sale_details = _cloud.sale_details; update_sale = _cloud.update_sale; delete_sale = _cloud.delete_sale
+        register_purchase = _cloud.register_purchase; client_history = _cloud.client_history
+        product_performance = _cloud.product_performance; return_sale_item = _cloud.return_sale_item
 except Exception:
     pass
