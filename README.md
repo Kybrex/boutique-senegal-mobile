@@ -35,6 +35,6 @@ La version adaptee a l'iPhone est `iphone_app.py` :
 - alertes de rupture et quantités de réapprovisionnement suggérées ;
 - tableau de bord des ventes, bénéfices, dépenses, produits et vendeurs ;
 - activation des comptes, réinitialisation des mots de passe et journal d'activité ;
-- sauvegarde ZIP des données en CSV ;
+- sauvegarde ZIP (CSV + JSON relationnel) et restauration sécurisée par fusion ;
 - inventaire physique avec correction et historique des écarts ;
 - boutiques multiples, stocks séparés et transferts.
