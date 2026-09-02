@@ -38,3 +38,6 @@ La version adaptee a l'iPhone est `iphone_app.py` :
 - sauvegarde ZIP (CSV + JSON relationnel) et restauration sécurisée par fusion ;
 - inventaire physique avec correction et historique des écarts ;
 - boutiques multiples, stocks séparés et transferts.
+- échéances de crédits avec alertes automatiques à J-5, 24 h et après retard ;
+- fiche d'inventaire PDF A4 prête à imprimer et remplir ;
+- photos de produits importées depuis la galerie ou l'appareil photo du téléphone.

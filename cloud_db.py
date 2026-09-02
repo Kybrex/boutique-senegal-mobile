@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from pathlib import Path
 import pandas as pd
 
 from supabase_client import client, is_configured
@@ -91,12 +92,14 @@ def low_stock() -> pd.DataFrame:
     return _frame([{ "Produit": r["name"], "Stock": r["stock"], "Minimum": r["min_stock"] } for r in _data(_table("products").select("*").execute()) if int(r["stock"]) <= int(r["min_stock"])])
 
 
-def save_sale(cart, seller_id, client_id, paid, method, discount):
+def save_sale(cart, seller_id, client_id, paid, method, discount, due_date=None):
     gross = sum(item["quantity"] * item["sale_price"] for item in cart); discount = max(0, min(discount, gross)); total = gross - discount
     for item in cart:
         product = _one("products", id=item["id"])
         if product is None or int(product["stock"]) < int(item["quantity"]): raise ValueError("Stock insuffisant.")
-    sale = _data(_table("sales").insert({"seller_id": seller_id, "client_id": client_id, "total": total, "discount": discount, "paid": paid, "payment_method": method}).execute())[0]
+    payload = {"seller_id": seller_id, "client_id": client_id, "total": total, "discount": discount, "paid": paid, "payment_method": method}
+    if due_date is not None: payload["due_date"] = due_date.isoformat() if hasattr(due_date, "isoformat") else str(due_date)
+    sale = _data(_table("sales").insert(payload).execute())[0]
     for item in cart:
         _table("sale_items").insert({"sale_id": sale["id"], "product_id": item["id"], "quantity": item["quantity"], "unit_price": item["sale_price"]}).execute()
         adjust_stock(item["id"], -int(item["quantity"]))
@@ -121,12 +124,12 @@ def register_purchase(product_id, quantity, unit_cost, supplier_name=""):
 
 
 def client_history(client_id):
-    rows = _data(_table("sales").select("id,created_at,total,paid,payment_method").eq("client_id", client_id).order("created_at", desc=True).execute())
+    rows = _data(_table("sales").select("id,created_at,total,paid,payment_method,due_date").eq("client_id", client_id).order("created_at", desc=True).execute())
     return _frame([{
         "Ticket": r["id"], "Date": r["created_at"], "Total": r["total"],
         "Paye": r["paid"], "Reste": max(0, float(r["total"]) - float(r["paid"])),
-        "Paiement": r["payment_method"],
-    } for r in rows])
+        "Paiement": r["payment_method"], "Echeance": r.get("due_date") or "",
+    } for r in rows], ["Ticket","Date","Total","Paye","Reste","Paiement","Echeance"])
 
 
 def product_performance(start, end):
@@ -197,6 +200,7 @@ def return_sale_item(sale_id, product_id, quantity):
 def v2_ready() -> bool:
     try:
         _table("shop_settings").select("id").limit(1).execute()
+        _table("sales").select("id,due_date").limit(1).execute()
         return True
     except Exception:
         return False
@@ -205,6 +209,7 @@ def v2_ready() -> bool:
 def v2_error() -> str:
     try:
         _table("shop_settings").select("id").limit(1).execute()
+        _table("sales").select("id,due_date").limit(1).execute()
         return ""
     except Exception as error:
         message = str(error).replace("SUPABASE_KEY", "clé Supabase")
@@ -213,6 +218,17 @@ def v2_error() -> str:
 
 def update_product_details(product_id, barcode, photo_url):
     _table("products").update({"barcode": barcode.strip() or None, "photo_url": photo_url.strip()}).eq("id", product_id).execute()
+
+
+def upload_product_photo(product_id, filename, content, content_type):
+    suffix = Path(filename or "photo.jpg").suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp"}: suffix = ".jpg"
+    path = f"product-{int(product_id)}/{datetime.now(timezone.utc):%Y%m%d%H%M%S%f}{suffix}"
+    bucket = client().storage.from_("product-images")
+    bucket.upload(path, content, {"content-type": content_type or "image/jpeg", "upsert": "true"})
+    public_url = bucket.get_public_url(path)
+    if isinstance(public_url, dict): public_url = public_url.get("publicUrl") or public_url.get("public_url") or ""
+    return str(public_url)
 
 
 def find_product_by_barcode(barcode):
@@ -233,6 +249,31 @@ def add_credit_payment(client_id, sale_id, amount, method, user_id):
 def credit_payments(client_id):
     rows = _data(_table("credit_payments").select("*,users(display_name)").eq("client_id",client_id).order("created_at",desc=True).execute())
     return _frame([{"Date":r["created_at"],"Ticket":r.get("sale_id"),"Montant":r["amount"],"Paiement":r["payment_method"],"Enregistre_par":(r.get("users") or {}).get("display_name","")} for r in rows], ["Date","Ticket","Montant","Paiement","Enregistre_par"])
+
+
+def set_credit_due_date(sale_id, due_date):
+    sale = _one("sales", id=sale_id)
+    if sale is None or float(sale["paid"]) >= float(sale["total"]): raise ValueError("Crédit soldé ou introuvable.")
+    value = due_date.isoformat() if hasattr(due_date, "isoformat") else str(due_date)
+    _table("sales").update({"due_date": value}).eq("id", sale_id).execute()
+
+
+def credit_alerts():
+    rows = _data(_table("sales").select("id,total,paid,due_date,clients(name,phone)").execute())
+    today = date.today(); alerts = []
+    for row in rows:
+        if not row.get("due_date"): continue
+        remaining = max(0, float(row["total"]) - float(row["paid"]))
+        if remaining <= 0: continue
+        due = date.fromisoformat(str(row["due_date"])[:10]); days = (due - today).days
+        if days < 0: status = "EN RETARD"
+        elif days <= 1: status = "ALERTE 24 H"
+        elif days <= 5: status = "ALERTE J-5"
+        else: continue
+        client_row = row.get("clients") or {}
+        alerts.append({"Statut":status,"Ticket":row["id"],"Client":client_row.get("name",""),"Telephone":client_row.get("phone",""),"Echeance":due.isoformat(),"Jours":days,"Reste":remaining})
+    order = {"EN RETARD":0,"ALERTE 24 H":1,"ALERTE J-5":2}
+    return _frame(sorted(alerts,key=lambda r:(order[r["Statut"]],r["Echeance"])), ["Statut","Ticket","Client","Telephone","Echeance","Jours","Reste"])
 
 
 def cash_summary(day, seller_id=None):
@@ -272,8 +313,8 @@ def all_users():
 
 
 def inventory_snapshot():
-    rows=_data(_table("products").select("id,name,stock,barcode").order("name").execute())
-    return _frame([{"id":r["id"],"Produit":r["name"],"Stock":r["stock"],"Code_barres":r.get("barcode","")} for r in rows], ["id","Produit","Stock","Code_barres"])
+    rows=_data(_table("products").select("id,name,category,stock,barcode").order("name").execute())
+    return _frame([{"id":r["id"],"Produit":r["name"],"Categorie":r.get("category","") or "","Stock":r["stock"],"Code_barres":r.get("barcode","") or ""} for r in rows], ["id","Produit","Categorie","Stock","Code_barres"])
 def save_inventory_count(product_id, counted, user_id, notes=""):
     product=_one("products",id=product_id)
     if product is None or counted < 0: raise ValueError("Comptage invalide.")

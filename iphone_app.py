@@ -4,7 +4,7 @@ Lancer avec : streamlit run iphone_app.py --server.port 8502
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
@@ -162,6 +162,11 @@ if page == "Accueil":
         st.success("Aucune alerte de stock.")
     else:
         st.dataframe(alerts, hide_index=True)
+    if db.v2_ready():
+        credit_alerts = db.credit_alerts()
+        st.subheader("Échéances de crédits", icon=":material/notifications_active:")
+        if credit_alerts.empty: st.success("Aucune échéance dans les 5 prochains jours.")
+        else: st.dataframe(credit_alerts, hide_index=True, column_config={"Reste": st.column_config.NumberColumn(format="%.0f FCFA")}, width="stretch")
 
 elif page == "Caisse":
     products = db.products()
@@ -227,12 +232,21 @@ elif page == "Caisse":
             client_name = st.selectbox("Client", list(client_map))
             method = st.selectbox("Paiement", ["Especes", "Wave", "Orange Money", "Carte", "Credit"])
             paid = st.number_input("Montant reçu", min_value=0.0, value=total, step=100.0)
+            is_credit = method == "Credit" or paid < total
+            credit_days = st.number_input("Durée du crédit (jours)", min_value=1, value=30, step=1) if is_credit else 0
+            due_date = date.today() + timedelta(days=int(credit_days)) if is_credit else None
+            credit_ready = db.v2_ready()
+            if due_date:
+                st.info(f"Échéance prévue : {due_date:%d/%m/%Y}")
+                if not credit_ready: st.warning("Exécutez la migration Supabase mise à jour avant d'enregistrer une vente à crédit.")
             with st.container(horizontal=True, horizontal_alignment="distribute"):
                 if st.button("Valider la vente", type="primary", icon=":material/check_circle:"):
-                    if paid < total and client_map[client_name] is None:
+                    if is_credit and not credit_ready:
+                        st.error("La migration Supabase doit être installée avant les nouvelles échéances de crédit.")
+                    elif is_credit and client_map[client_name] is None:
                         st.error("Sélectionnez un client pour une vente à crédit.")
                     else:
-                        ticket, saved_gross, saved_total = db.save_sale(st.session_state.mobile_cart, seller_id, client_map[client_name], paid, method, discount)
+                        ticket, saved_gross, saved_total = db.save_sale(st.session_state.mobile_cart, seller_id, client_map[client_name], paid, method, discount, due_date)
                         settings = db.get_settings() if db.v2_ready() else {}
                         receipt_args = (ticket, st.session_state.mobile_cart, seller_name, client_name, saved_gross, discount, saved_total, paid, method, settings)
                         st.session_state.mobile_receipt = make_receipt(*receipt_args)
@@ -299,16 +313,24 @@ elif page == "Produits":
                 except ValueError as error:
                     st.error(str(error))
         if db.v2_ready():
-            with st.expander("Code-barres et photo du produit", icon=":material/barcode:"):
+            with st.expander("Code-barres et photo du produit", icon=":material/add_a_photo:"):
                 detail_name = st.selectbox("Produit à identifier", inventory.Produit.tolist(), key="detail_product")
-                detail_id = int(inventory.loc[inventory.Produit == detail_name, "id"].iloc[0])
-                with st.form("product_details"):
-                    barcode = st.text_input("Code-barres")
-                    photo_url = st.text_input("Lien de la photo")
-                    if st.form_submit_button("Enregistrer l'identification", type="primary"):
-                        try:
-                            db.update_product_details(detail_id, barcode, photo_url); db.log_action(int(user["id"]), "PRODUIT_IDENTIFIE", detail_name); st.success("Code-barres et photo enregistrés.")
-                        except Exception: st.error("Ce code-barres est déjà utilisé par un autre produit.")
+                detail_row = inventory.loc[inventory.Produit == detail_name].iloc[0]; detail_id = int(detail_row.id)
+                current_photo = str(detail_row.Photo or "")
+                if current_photo: st.image(current_photo, caption=detail_name, width=220)
+                barcode = st.text_input("Code-barres", value=str(detail_row.Code_barres or ""))
+                photo_file = st.file_uploader("Choisir une photo", type=["jpg","jpeg","png","webp"], key=f"photo_{detail_id}")
+                camera_photo = st.camera_input("Ou prendre une photo", key=f"camera_{detail_id}")
+                if st.button("Enregistrer le code-barres et la photo", type="primary", key=f"save_details_{detail_id}"):
+                    try:
+                        uploaded = camera_photo or photo_file; photo_url = current_photo
+                        if uploaded is not None:
+                            content = uploaded.getvalue()
+                            if len(content) > 5 * 1024 * 1024: raise ValueError("La photo dépasse 5 Mo.")
+                            photo_url = db.upload_product_photo(detail_id, getattr(uploaded,"name","camera.jpg"), content, getattr(uploaded,"type","image/jpeg"))
+                        db.update_product_details(detail_id, barcode, photo_url); db.log_action(int(user["id"]), "PRODUIT_IDENTIFIE", detail_name); st.success("Code-barres et photo enregistrés."); st.rerun()
+                    except ValueError as error: st.error(str(error))
+                    except Exception as error: st.error(f"Impossible d'enregistrer la photo : {error}")
 
 elif page == "Achats":
     st.header("Achats fournisseurs", icon=":material/local_shipping:")
@@ -351,6 +373,13 @@ elif page == "Contacts":
 
 elif page == "Crédits":
     st.header("Crédits et historique clients", icon=":material/account_balance_wallet:")
+    if v2_ui.migration_required(): st.stop()
+    if db.v2_ready():
+        alerts = db.credit_alerts()
+        if alerts.empty: st.success("Aucune échéance dans les 5 prochains jours.")
+        else:
+            st.warning(f"{len(alerts)} crédit(s) nécessitent votre attention.", icon=":material/notifications_active:")
+            st.dataframe(alerts, hide_index=True, column_config={"Reste": st.column_config.NumberColumn(format="%.0f FCFA")}, width="stretch")
     customers = db.clients()
     if customers.empty:
         st.info("Ajoutez d'abord un client dans Contacts.")
@@ -364,6 +393,14 @@ elif page == "Crédits":
         if db.v2_ready() and balance > 0:
             debts = history[history.Reste > 0]
             ticket_map = {f"Ticket #{int(row.Ticket)} — reste {fcfa(float(row.Reste))}": row for _, row in debts.iterrows()}
+            with st.form("credit_due_date"):
+                due_ticket_label = st.selectbox("Crédit à planifier", list(ticket_map)); due_row = ticket_map[due_ticket_label]
+                duration = st.number_input("Nouveau délai (jours)", min_value=1, value=30, step=1)
+                calculated_due = date.today() + timedelta(days=int(duration)); st.caption(f"Nouvelle échéance : {calculated_due:%d/%m/%Y}")
+                if st.form_submit_button("Enregistrer l'échéance"):
+                    try:
+                        db.set_credit_due_date(int(due_row.Ticket), calculated_due); db.log_action(int(user["id"]), "ECHEANCE_CREDIT", f"Ticket #{int(due_row.Ticket)} - {calculated_due}"); st.success("Échéance enregistrée."); st.rerun()
+                    except ValueError as error: st.error(str(error))
             with st.form("credit_payment"):
                 ticket_label = st.selectbox("Vente à rembourser", list(ticket_map)); debt_row = ticket_map[ticket_label]
                 amount = st.number_input("Montant du remboursement", min_value=1.0, max_value=float(debt_row.Reste), step=100.0)

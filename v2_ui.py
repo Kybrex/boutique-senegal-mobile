@@ -12,6 +12,7 @@ import pandas as pd
 import streamlit as st
 
 import db
+from receipt import make_inventory_pdf
 
 
 def fcfa(value: float) -> str:
@@ -123,6 +124,10 @@ def inventory_page(user: dict) -> None:
     st.header("Inventaire physique", icon=":material/fact_check:")
     stock = db.inventory_snapshot()
     if stock.empty: st.info("Ajoutez d'abord des produits."); return
+    settings = db.get_settings()
+    inventory_pdf = make_inventory_pdf(stock, settings)
+    st.download_button("Télécharger la fiche PDF à imprimer", inventory_pdf, file_name=f"inventaire_{date.today():%Y-%m-%d}.pdf", mime="application/pdf", icon=":material/picture_as_pdf:", width="stretch")
+    st.caption("Le PDF contient une ligne par produit et des cases vides pour noter le stock compté, l'écart et les observations.")
     choices = {f"{r.Produit} — stock système: {int(r.Stock)}": r for _, r in stock.iterrows()}
     selected = st.selectbox("Produit compté", list(choices)); row = choices[selected]
     with st.form("inventory_count"):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 from datetime import date, datetime, timezone
 from pathlib import Path
+import base64
 import hashlib
 import hmac
 import json
@@ -45,6 +46,7 @@ def init_db() -> None:
         _column(conn, "clients", "email", "TEXT")
         _column(conn, "products", "barcode", "TEXT")
         _column(conn, "products", "photo_url", "TEXT DEFAULT ''")
+        _column(conn, "sales", "due_date", "TEXT")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS products_barcode_unique ON products(barcode) WHERE barcode IS NOT NULL AND barcode<>''")
         conn.commit()
 def query(sql: str, params: tuple = ()) -> pd.DataFrame:
@@ -88,10 +90,11 @@ def create_seller_with_user(name: str, phone: str, email: str, username: str, pa
         conn.commit()
 def add_supplier(name: str, contact: str, phone: str, email: str, address: str) -> None: execute("INSERT INTO suppliers(name,contact,phone,email,address) VALUES(?,?,?,?,?)", (name.strip(), contact.strip(), phone.strip(), email.strip().lower(), address.strip()))
 def add_client(name: str, phone: str, email: str, address: str) -> None: execute("INSERT INTO clients(name,phone,email,address) VALUES(?,?,?,?)", (name.strip(), phone.strip(), email.strip().lower(), address.strip()))
-def save_sale(cart: list[dict], seller_id: int, client_id: int | None, paid: float, method: str, discount: float) -> tuple[int, float, float]:
+def save_sale(cart: list[dict], seller_id: int, client_id: int | None, paid: float, method: str, discount: float, due_date=None) -> tuple[int, float, float]:
     gross = sum(item["quantity"] * item["sale_price"] for item in cart); discount = max(0, min(discount, gross)); total = gross-discount
     with connection() as conn:
-        cursor = conn.execute("INSERT INTO sales(seller_id,client_id,total,discount,paid,payment_method) VALUES(?,?,?,?,?,?)", (seller_id, client_id, total, discount, paid, method)); sale_id = cursor.lastrowid
+        due_value = due_date.isoformat() if hasattr(due_date, "isoformat") else due_date
+        cursor = conn.execute("INSERT INTO sales(seller_id,client_id,total,discount,paid,payment_method,due_date) VALUES(?,?,?,?,?,?,?)", (seller_id, client_id, total, discount, paid, method, due_value)); sale_id = cursor.lastrowid
         for item in cart:
             conn.execute("INSERT INTO sale_items(sale_id,product_id,quantity,unit_price) VALUES(?,?,?,?)", (sale_id, item["id"], item["quantity"], item["sale_price"]))
             conn.execute("UPDATE products SET stock=stock-? WHERE id=? AND stock>=?", (item["quantity"], item["id"], item["quantity"]))
@@ -157,7 +160,7 @@ def register_purchase(product_id: int, quantity: int, unit_cost: float, supplier
         label = f"Achat stock - {product['name']} x{quantity}" + (f" - {supplier_name}" if supplier_name else "")
         conn.execute("INSERT INTO expenses(label,amount) VALUES(?,?)", (label, quantity*unit_cost)); conn.commit()
 def client_history(client_id: int) -> pd.DataFrame:
-    return query("SELECT id AS Ticket,created_at AS Date,total AS Total,paid AS Paye,MAX(total-paid,0) AS Reste,payment_method AS Paiement FROM sales WHERE client_id=? ORDER BY created_at DESC", (client_id,))
+    return query("SELECT id AS Ticket,created_at AS Date,total AS Total,paid AS Paye,MAX(total-paid,0) AS Reste,payment_method AS Paiement,COALESCE(due_date,'') AS Echeance FROM sales WHERE client_id=? ORDER BY created_at DESC", (client_id,))
 def product_performance(start: date, end: date) -> pd.DataFrame:
     return query("SELECT p.name AS Produit,SUM(si.quantity) AS Quantite,SUM(si.quantity*si.unit_price) AS Chiffre,SUM(si.quantity*(si.unit_price-p.purchase_price)) AS Benefice FROM sale_items si JOIN sales s ON s.id=si.sale_id LEFT JOIN products p ON p.id=si.product_id WHERE date(s.created_at) BETWEEN ? AND ? GROUP BY si.product_id,p.name ORDER BY Chiffre DESC", (start.isoformat(), end.isoformat()))
 def products() -> pd.DataFrame: return query("SELECT p.id,p.name AS Produit,p.category AS Categorie,p.purchase_price AS Achat,p.sale_price AS Vente,p.stock AS Stock,p.min_stock AS Minimum,COALESCE(s.name,'') AS Fournisseur,COALESCE(p.barcode,'') AS Code_barres,COALESCE(p.photo_url,'') AS Photo FROM products p LEFT JOIN suppliers s ON s.id=p.supplier_id ORDER BY p.name")
@@ -175,6 +178,9 @@ def v2_ready() -> bool: return True
 def v2_error() -> str: return ""
 def update_product_details(product_id: int, barcode: str, photo_url: str) -> None:
     execute("UPDATE products SET barcode=?,photo_url=? WHERE id=?", (barcode.strip() or None, photo_url.strip(), product_id))
+def upload_product_photo(product_id: int, filename: str, content: bytes, content_type: str) -> str:
+    mime = content_type if content_type in {"image/jpeg","image/png","image/webp"} else "image/jpeg"
+    return f"data:{mime};base64,{base64.b64encode(content).decode('ascii')}"
 def find_product_by_barcode(barcode: str) -> dict | None:
     rows = query("SELECT id,name AS Produit,sale_price AS Vente,stock AS Stock FROM products WHERE barcode=?", (barcode.strip(),))
     return None if rows.empty else rows.iloc[0].to_dict()
@@ -189,6 +195,20 @@ def add_credit_payment(client_id: int, sale_id: int, amount: float, method: str,
         conn.execute("INSERT INTO credit_payments(client_id,sale_id,amount,payment_method,recorded_by) VALUES(?,?,?,?,?)", (client_id,sale_id,amount,method,user_id)); conn.commit()
 def credit_payments(client_id: int) -> pd.DataFrame:
     return query("SELECT cp.created_at AS Date,cp.sale_id AS Ticket,cp.amount AS Montant,cp.payment_method AS Paiement,COALESCE(u.display_name,'') AS Enregistre_par FROM credit_payments cp LEFT JOIN users u ON u.id=cp.recorded_by WHERE cp.client_id=? ORDER BY cp.created_at DESC", (client_id,))
+def set_credit_due_date(sale_id: int, due_date: date) -> None:
+    with connection() as conn:
+        sale = conn.execute("SELECT total,paid FROM sales WHERE id=?", (sale_id,)).fetchone()
+        if sale is None or float(sale["paid"]) >= float(sale["total"]): raise ValueError("Crédit soldé ou introuvable.")
+        conn.execute("UPDATE sales SET due_date=? WHERE id=?", (due_date.isoformat(),sale_id)); conn.commit()
+def credit_alerts() -> pd.DataFrame:
+    frame = query("SELECT s.id AS Ticket,c.name AS Client,c.phone AS Telephone,s.due_date AS Echeance,MAX(s.total-s.paid,0) AS Reste FROM sales s LEFT JOIN clients c ON c.id=s.client_id WHERE s.due_date IS NOT NULL AND s.total>s.paid")
+    columns=["Statut","Ticket","Client","Telephone","Echeance","Jours","Reste"]
+    if frame.empty: return pd.DataFrame(columns=columns)
+    frame["Echeance"] = pd.to_datetime(frame.Echeance).dt.date
+    frame["Jours"] = frame.Echeance.map(lambda value:(value-date.today()).days)
+    frame = frame[frame.Jours <= 5].copy()
+    frame["Statut"] = frame.Jours.map(lambda days:"EN RETARD" if days<0 else ("ALERTE 24 H" if days<=1 else "ALERTE J-5"))
+    return frame[columns].sort_values(["Jours","Echeance"])
 def cash_summary(day: date, seller_id: int | None = None) -> pd.DataFrame:
     sql = "SELECT payment_method AS Paiement,COUNT(*) AS Transactions,SUM(paid) AS Montant FROM sales WHERE date(created_at)=?"
     params: tuple = (day.isoformat(),)
@@ -206,7 +226,7 @@ def audit_logs() -> pd.DataFrame:
 def set_user_active(user_id: int, active: bool) -> None: execute("UPDATE users SET active=? WHERE id=? AND role<>'admin'", (int(active),user_id))
 def reset_user_password(user_id: int, password: str) -> None: execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash(password),user_id))
 def all_users() -> pd.DataFrame: return query("SELECT id,username AS Identifiant,display_name AS Nom,role AS Role,active AS Actif FROM users ORDER BY role,display_name")
-def inventory_snapshot() -> pd.DataFrame: return query("SELECT id,name AS Produit,stock AS Stock,barcode AS Code_barres FROM products ORDER BY name")
+def inventory_snapshot() -> pd.DataFrame: return query("SELECT id,name AS Produit,COALESCE(category,'') AS Categorie,stock AS Stock,COALESCE(barcode,'') AS Code_barres FROM products ORDER BY name")
 def save_inventory_count(product_id: int, counted: int, user_id: int, notes: str = "") -> None:
     if counted < 0: raise ValueError("Le stock compté ne peut pas être négatif.")
     with connection() as conn:
@@ -297,8 +317,8 @@ try:
         sale_details = _cloud.sale_details; update_sale = _cloud.update_sale; delete_sale = _cloud.delete_sale
         register_purchase = _cloud.register_purchase; client_history = _cloud.client_history
         product_performance = _cloud.product_performance; return_sale_item = _cloud.return_sale_item
-        v2_ready = _cloud.v2_ready; v2_error = _cloud.v2_error; update_product_details = _cloud.update_product_details; find_product_by_barcode = _cloud.find_product_by_barcode
-        add_credit_payment = _cloud.add_credit_payment; credit_payments = _cloud.credit_payments
+        v2_ready = _cloud.v2_ready; v2_error = _cloud.v2_error; update_product_details = _cloud.update_product_details; upload_product_photo = _cloud.upload_product_photo; find_product_by_barcode = _cloud.find_product_by_barcode
+        add_credit_payment = _cloud.add_credit_payment; credit_payments = _cloud.credit_payments; set_credit_due_date = _cloud.set_credit_due_date; credit_alerts = _cloud.credit_alerts
         cash_summary = _cloud.cash_summary; close_cash = _cloud.close_cash; cash_closings = _cloud.cash_closings
         log_action = _cloud.log_action; audit_logs = _cloud.audit_logs; set_user_active = _cloud.set_user_active
         def reset_user_password(user_id, password): _cloud.reset_user_password(user_id, password_hash(password))
