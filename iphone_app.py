@@ -52,6 +52,8 @@ import v3_db as v3
 import v3_ui
 import v4_db as v4
 import v4_ui
+import business_features as features
+import business_features_ui as features_ui
 
 db.init_db()
 st.session_state.setdefault("mobile_cart", [])
@@ -128,12 +130,12 @@ if is_admin and v4.v4_ready() and not st.session_state.get("v4_session_tasks_don
 
 # Seven everyday sections. Existing internal routes remain compatible with documents.
 sections = {
-    "Tableau de bord": [("Accueil", "Vue d'ensemble"), ("Rapports", "Rapports et dépenses")],
+    "Tableau de bord": [("Accueil", "Vue d'ensemble"), ("Rapports", "Rapports et dépenses"), ("Bénéfice", "Bénéfice")],
     "Ventes": [("Caisse", "Nouvelle vente"), ("Historique", "Historique"), ("Retours V3", "Retours")],
     "Achats": [("Achats", "Achat reçu"), ("Commandes", "Commandes et règlements")],
-    "Stock": [("Produits", "Produits et quantités"), ("Inventaire", "Inventaire")],
-    "Fournisseurs": [("Fournisseurs", "Fournisseurs")],
-    "Clients": [("Clients", "Liste des clients"), ("Crédits", "Historique et crédits")],
+    "Stock": [("Produits", "Produits et quantités"), ("Inventaire", "Inventaire"), ("Réapprovisionnement", "À commander")],
+    "Fournisseurs": [("Fournisseurs", "Fournisseurs"), ("Dettes fournisseurs", "Sommes à payer")],
+    "Clients": [("Clients", "Liste des clients"), ("Crédits", "Historique et crédits"), ("Dettes clients", "Impayés et échéances")],
     "Facturation": [("Factures", "Factures des ventes"), ("Documents", "Devis et autres documents")],
 }
 if not is_admin:
@@ -143,7 +145,7 @@ if not is_admin:
     if permissions["stock"]:
         sections["Stock"] = [("Stock", "Stock disponible")]
 settings_pages = [("Paramètres", "Boutique"), ("Comptes", "Vendeurs et comptes"),
-                  ("Permissions", "Droits d'accès"), ("Sécurité", "Sauvegarde et sécurité")]
+                  ("Permissions", "Droits d'accès"), ("Sauvegardes", "Sauvegarder et récupérer"), ("Sécurité", "Sécurité des comptes")]
 allowed = [route for routes in sections.values() for route, _ in routes]
 if is_admin:
     allowed += [route for route, _ in settings_pages]
@@ -168,6 +170,8 @@ with st.sidebar:
                     st.rerun()
     st.button("Se déconnecter", icon=":material/logout:", on_click=sign_out, width="stretch")
 
+if is_admin:
+    features_ui.search_box()
 st.subheader(active_section)
 routes = settings_pages if active_section == "Réglages" else sections[active_section]
 if len(routes) > 1:
@@ -181,7 +185,19 @@ if len(routes) > 1:
         st.rerun()
 page = st.session_state.mobile_page
 
-if page == "Accueil":
+if page == "Bénéfice":
+    features_ui.profit_page(user)
+elif page == "Réapprovisionnement":
+    if st.session_state.get("reorder_success"):
+        st.success(st.session_state.pop("reorder_success"))
+    features_ui.reorder_page(user)
+elif page == "Dettes clients":
+    features_ui.debts_page(user, "clients")
+elif page == "Dettes fournisseurs":
+    features_ui.debts_page(user, "fournisseurs")
+elif page == "Sauvegardes":
+    features_ui.backups_page(user)
+elif page == "Accueil":
     summary = db.today_summary().iloc[0]
     alerts = db.low_stock()
     st.header("Aujourd'hui", icon=":material/today:")
@@ -192,6 +208,12 @@ if page == "Accueil":
     purchases = db.expenses(date.today(), date.today())
     purchase_total = float(purchases.loc[purchases.Libelle.str.startswith("Achat stock", na=False), "Montant"].sum()) if not purchases.empty else 0.0
     st.metric("Achats de stock aujourd'hui", fcfa(purchase_total))
+    if st.button("Voir les impayés clients"):
+        features_ui.go("Dettes clients")
+    if st.button("Voir les sommes dues aux fournisseurs"):
+        features_ui.go("Dettes fournisseurs")
+    if st.button("Préparer les commandes de stock"):
+        features_ui.go("Réapprovisionnement")
     st.subheader("Stock à surveiller", icon=":material/warning:")
     if alerts.empty:
         st.success("Aucune alerte de stock.")
@@ -614,6 +636,7 @@ elif page == "Sécurité":
 
 elif page == "Paramètres":
     v2_ui.settings_page(user)
+    features_ui.invoice_settings(user)
 
 elif page == "Factures":
     from business_pdf import make_business_document_pdf
@@ -638,11 +661,19 @@ elif page == "Factures":
         remaining = max(total - paid, 0)
         st.metric("Total", fcfa(total))
         st.metric("Reste à payer", fcfa(remaining))
-        document = {"id": f"VENTE-{sale_id:06d}", "Type": "FACTURE",
+        st.metric("État du paiement", features.payment_status(total, paid))
+        if remaining > 0:
+            with st.form("invoice_due"):
+                due = st.date_input("Échéance de la facture", value=date.fromisoformat(str(sale["due_date"])[:10]) if sale.get("due_date") else date.today()+timedelta(days=30))
+                if st.form_submit_button("Enregistrer l’échéance de la facture"):
+                    db.set_credit_due_date(sale_id, due)
+                    st.rerun()
+        document = {"id": features.invoice_number(sale_id), "Type": "FACTURE",
+                    "paid": paid, "due_date": sale.get("due_date"),
                     "Date": sale["created_at"], "Client": row.Client, "Total": total,
                     "Notes": f"Remise : {fcfa(sale['discount'])}. Payé : {fcfa(min(paid, total))}. "
                              f"Reste à payer : {fcfa(remaining)}. Paiement : {sale['payment_method']}."}
-        pdf = make_business_document_pdf(document, items, db.get_settings() if db.v2_ready() else {})
+        pdf = make_business_document_pdf(document, items, dict(db.get_settings() if db.v2_ready() else {}, **features.invoice_settings()))
         st.download_button("Télécharger la facture PDF", pdf,
                            file_name=f"facture_vente_{sale_id:06d}.pdf", mime="application/pdf",
                            icon=":material/download:")
@@ -695,5 +726,7 @@ elif page == "Propriétaire":
 
 elif page == "Stock":
     v3_ui.stock_readonly_page()
+
+
 
 

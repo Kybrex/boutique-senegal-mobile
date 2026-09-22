@@ -308,6 +308,8 @@ def backup_bundle() -> dict:
         tables[table] = json.loads(frame.to_json(orient="records", date_format="iso"))
     return {"format":"boutique-senegal-backup","version":2,"created_at":datetime.now(timezone.utc).isoformat(),"tables":tables}
 def restore_backup(bundle: dict) -> dict:
+    from business_features import validate_backup
+    validate_backup(bundle)
     if bundle.get("format") != "boutique-senegal-backup" or int(bundle.get("version",0)) != 2: raise ValueError("Fichier de sauvegarde incompatible.")
     tables=bundle.get("tables");
     if not isinstance(tables,dict): raise ValueError("Sauvegarde invalide.")
@@ -363,3 +365,5 @@ try:
         backup_bundle = _cloud.backup_bundle; restore_backup = _cloud.restore_backup
 except Exception:
     pass
+
+

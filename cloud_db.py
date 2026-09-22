@@ -372,12 +372,11 @@ def dashboard(start,end):
 
 BACKUP_TABLES=["suppliers","sellers","clients","stores","products","users","sales","sale_items","expenses","shop_settings","store_stock","credit_payments","cash_closings","inventory_counts","stock_transfers","activity_logs","documents","document_items","purchase_orders","purchase_order_items","supplier_payments","returns","cash_movements","product_lots","offline_imports","product_variants","approval_logs","notification_events","backup_runs"]
 def backup_bundle():
-    tables={}
-    for table in BACKUP_TABLES:
-        try: tables[table]=_data(_table(table).select("*").execute())
-        except Exception: continue
-    return {"format":"boutique-senegal-backup","version":2,"created_at":datetime.now(timezone.utc).isoformat(),"tables":tables}
+    from business_features import complete_backup
+    return complete_backup()
 def restore_backup(bundle):
+    from business_features import validate_backup, records
+    validate_backup(bundle)
     if bundle.get("format")!="boutique-senegal-backup" or int(bundle.get("version",0))!=2: raise ValueError("Fichier de sauvegarde incompatible.")
     tables=bundle.get("tables")
     if not isinstance(tables,dict): raise ValueError("Sauvegarde invalide.")
@@ -386,17 +385,19 @@ def restore_backup(bundle):
         rows=tables.get(table,[])
         if not isinstance(rows,list): raise ValueError(f"Données invalides pour {table}.")
         keys=("store_id","product_id") if table=="store_stock" else ("id",)
-        try: existing_rows=_data(_table(table).select(",".join(keys)).execute())
-        except Exception: continue
+        if not rows:
+            continue
+        existing_rows=records(table)
         existing={tuple(row.get(key) for key in keys) for row in existing_rows}; count=0; ignored=0
         for row in rows:
             identity=tuple(row.get(key) for key in keys)
             if identity in existing: ignored+=1; continue
             try:
                 _table(table).insert(row).execute(); existing.add(identity); count+=1
-            except Exception:
-                ignored+=1
+            except Exception as error:
+                raise ValueError(f"Récupération interrompue dans {table}. Certaines lignes ont déjà été ajoutées.") from error
         restored[table]=count; skipped[table]=ignored
-    try: client().rpc("sync_boutique_sequences").execute()
-    except Exception: pass
+    client().rpc("sync_boutique_sequences").execute()
     return {"restored":restored,"skipped":skipped}
+
+

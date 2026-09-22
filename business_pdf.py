@@ -31,9 +31,25 @@ def make_business_document_pdf(document: dict, items: pd.DataFrame, settings: di
     green=colors.HexColor("#12372A"); small=ParagraphStyle("small",parent=styles["Normal"],fontSize=9,leading=12)
     story=logo_flowables() + [Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("shop",parent=styles["Title"],textColor=green,fontSize=18,leading=22)),Spacer(1,2*mm)]
     story.extend([Spacer(1,7*mm),Paragraph(title,ParagraphStyle("doctype",parent=styles["Heading1"],alignment=TA_RIGHT,textColor=green,fontSize=20))])
+    legal = " - ".join(f"{label} : {escape(str(settings[key]))}" for key,label in (("ninea","NINEA"),("rccm","RCCM")) if settings.get(key))
+    if legal:
+        story.append(Paragraph(legal, small))
     number=document.get("id",document.get("Numero","")); created=str(document.get("created_at",document.get("Date",date.today().isoformat())))[:10]
     client=escape(str(document.get("Client",document.get("client","Comptant")) or "Comptant")); valid=document.get("valid_until",document.get("Validite","")) or ""
     meta=[["Numéro",f"#{number}"],["Date",created],["Fournisseur" if kind=="BON_COMMANDE" else "Client",Paragraph(client,small)]]
+    if kind == "FACTURE":
+        from business_features import invoice_number, payment_status
+        if str(number).isdigit():
+            meta[0][1] = invoice_number(number, "DOC")
+        due = document.get("due_date") or valid
+        if due:
+            meta.append(["Échéance", str(due)[:10]])
+        if document.get("paid") is not None:
+            invoice_total = float(document.get("Total", document.get("total", 0)))
+            invoice_paid = float(document["paid"])
+            meta.extend([["Paiement", payment_status(invoice_total, invoice_paid)], ["Payé", _money(min(invoice_paid,invoice_total))], ["Reste à payer", _money(max(0,invoice_total-invoice_paid))]])
+        else:
+            meta.append(["Paiement", "À suivre dans la vente associée"])
     if kind=="DEVIS" and valid: meta.append(["Valable jusqu'au",str(valid)[:10]])
     mt=Table(meta,colWidths=[40*mm,80*mm],hAlign="RIGHT"); mt.setStyle(TableStyle([("FONTNAME",(0,0),(0,-1),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),9),("BOTTOMPADDING",(0,0),(-1,-1),5)])); story.extend([mt,Spacer(1,7*mm)])
     rows=[["Produit","Quantité","Prix unitaire","Total"]]
@@ -68,3 +84,5 @@ def make_product_list_pdf(products: pd.DataFrame, settings: dict | None = None) 
     table=Table(rows,colWidths=[8*mm,42*mm,27*mm,32*mm,25*mm,25*mm,13*mm,16*mm],repeatRows=1)
     table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),green),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),7),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#888888")),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("ALIGN",(4,1),(-1,-1),"RIGHT"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F3F7F4")]),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)])); story.append(table)
     build_document(doc, story, settings); return output.getvalue()
+
+

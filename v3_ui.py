@@ -11,6 +11,7 @@ import streamlit as st
 
 import db
 import v3_db as v3
+import business_features as features
 from business_pdf import make_business_document_pdf, make_product_list_pdf
 from offline_pos import make_offline_pos
 
@@ -61,7 +62,7 @@ def documents_page(user):
     history=v3.documents(); st.subheader("Documents enregistrés"); st.dataframe(history,hide_index=True,width="stretch")
     if not history.empty:
         labels={f"{r.Type} #{int(r.id)} - {r.Client} - {fcfa(r.Total)}":int(r.id) for _,r in history.iterrows()}; selected=st.selectbox("Ouvrir un document",list(labels)); doc_id=labels[selected]
-        document,items=v3.document_details(doc_id); pdf=make_business_document_pdf(document,items,db.get_settings())
+        document,items=v3.document_details(doc_id); pdf=make_business_document_pdf(document,items,dict(db.get_settings(), **features.invoice_settings()))
         st.dataframe(items,hide_index=True,width="stretch"); st.download_button("Télécharger le PDF",pdf,file_name=f"document_{doc_id}.pdf",mime="application/pdf",icon=":material/picture_as_pdf:")
         cols=st.columns(2)
         if cols[0].button("Convertir en vente",type="primary"):
@@ -96,7 +97,7 @@ def purchase_orders_page(user):
                 ilabel=st.selectbox("Article reçu",list(imap)); item=imap[ilabel]; qty=st.number_input("Quantité reçue",min_value=1,max_value=int(item.Restante),step=1)
                 if st.form_submit_button("Réceptionner et augmenter le stock",type="primary"): v3.receive_purchase_order_item(oid,int(item.id),int(qty)); db.log_action(int(user["id"]),"RECEPTION_COMMANDE",f"Commande #{oid} - {qty}"); st.success("Réception enregistrée."); st.rerun()
         order=orders[orders.id==oid].iloc[0]
-        pdf_items=items.rename(columns={"Commande":"Quantite","Cout":"Prix"}); order_pdf=make_business_document_pdf({"id":oid,"Type":"BON_COMMANDE","Client":order.Fournisseur,"Total":order.Total,"Date":order.Date},pdf_items,db.get_settings())
+        pdf_items=items.rename(columns={"Commande":"Quantite","Cout":"Prix"}); order_pdf=make_business_document_pdf({"id":oid,"Type":"BON_COMMANDE","Client":order.Fournisseur,"Total":order.Total,"Date":order.Date},pdf_items,dict(db.get_settings(), **features.invoice_settings()))
         st.download_button("Télécharger le bon de commande PDF",order_pdf,file_name=f"bon_commande_{oid}.pdf",mime="application/pdf",icon=":material/picture_as_pdf:")
         if float(order.Reste)>0:
             with st.form("supplier_payment"):
@@ -203,3 +204,5 @@ def credit_reminder_link(row) -> str:
     digits="".join(c for c in str(row.Telephone) if c.isdigit()); status=str(row.Statut).replace("_"," ").lower()
     message=quote(f"Bonjour {row.Client}, rappel Boutique Senegal : le solde du ticket #{int(row.Ticket)} est de {fcfa(row.Reste)}. Échéance : {row.Echeance} ({status}). Merci.")
     return f"https://wa.me/{digits}?text={message}" if digits else f"https://wa.me/?text={message}"
+
+
