@@ -12,7 +12,7 @@ from receipt import make_receipt, make_receipt_pdf
 import v2_ui
 
 
-st.set_page_config(page_title="Boutique Senegal Mobile", page_icon=":material/storefront:", layout="centered")
+st.set_page_config(page_title="Boutique Sénégal", page_icon=":material/storefront:", layout="centered")
 
 
 def validate_supabase_secrets() -> str | None:
@@ -69,7 +69,7 @@ def sign_out() -> None:
 
 if db.user_count() == 0:
     st.title("Boutique Senegal", icon=":material/storefront:")
-    st.caption("Version mobile pour iPhone")
+    st.caption("Gestion de votre boutique")
     st.header("Administrateur principal", icon=":material/admin_panel_settings:")
     with st.form("mobile_setup_admin"):
         name = st.text_input("Nom complet")
@@ -91,7 +91,7 @@ if db.user_count() == 0:
 
 if "mobile_user" not in st.session_state:
     st.title("Boutique Senegal", icon=":material/storefront:")
-    st.caption("Caisse et stock — version mobile")
+    st.caption("Ventes, achats, stock et facturation")
     with st.form("mobile_login"):
         username = st.text_input("Nom d'utilisateur")
         password = st.text_input("Mot de passe", type="password")
@@ -122,64 +122,58 @@ if is_admin and v4.v4_ready() and not st.session_state.get("v4_session_tasks_don
         st.session_state.v4_backup_status=f"indisponible: {str(error)[:120]}"
     st.session_state.v4_session_tasks_done=True
 
+# Seven everyday sections. Existing internal routes remain compatible with documents.
+sections = {
+    "Tableau de bord": [("Accueil", "Vue d'ensemble"), ("Rapports", "Rapports et dépenses")],
+    "Ventes": [("Caisse", "Nouvelle vente"), ("Historique", "Historique"), ("Retours V3", "Retours")],
+    "Achats": [("Achats", "Achat reçu"), ("Commandes", "Commandes et règlements")],
+    "Stock": [("Produits", "Produits et quantités"), ("Inventaire", "Inventaire")],
+    "Fournisseurs": [("Fournisseurs", "Fournisseurs")],
+    "Clients": [("Clients", "Liste des clients"), ("Crédits", "Historique et crédits")],
+    "Facturation": [("Factures", "Factures des ventes"), ("Documents", "Devis et autres documents")],
+}
+if not is_admin:
+    sections = {"Ventes": [("Caisse", "Nouvelle vente")]}
+    if permissions["returns"] and v3.v3_ready():
+        sections["Ventes"].append(("Retours V3", "Retours"))
+    if permissions["stock"]:
+        sections["Stock"] = [("Stock", "Stock disponible")]
+settings_pages = [("Paramètres", "Boutique"), ("Comptes", "Vendeurs et comptes"),
+                  ("Permissions", "Droits d'accès"), ("Sécurité", "Sauvegarde et sécurité")]
+allowed = [route for routes in sections.values() for route, _ in routes]
 if is_admin:
-    pages = [
-        ("Accueil", ":material/home:"),
-        ("Caisse", ":material/point_of_sale:"),
-        ("Produits", ":material/inventory_2:"),
-        ("Achats", ":material/local_shipping:"),
-        ("Contacts", ":material/contacts:"),
-        ("Crédits", ":material/account_balance_wallet:"),
-        ("Comptes", ":material/manage_accounts:"),
-        ("Rapports", ":material/analytics:"),
-        ("Tableau V2", ":material/monitoring:"),
-        ("Clôture", ":material/point_of_sale:"),
-        ("Inventaire", ":material/fact_check:"),
-        ("Boutiques", ":material/store:"),
-        ("Sécurité", ":material/security:"),
-        ("Paramètres", ":material/settings:"),
-        ("Documents", ":material/description:"),
-        ("Commandes", ":material/inventory:"),
-        ("Retours V3", ":material/assignment_return:"),
-        ("Fidélité", ":material/loyalty:"),
-        ("Lots", ":material/event_busy:"),
-        ("Permissions", ":material/admin_panel_settings:"),
-        ("Caisse secours", ":material/cloud_off:"),
-        ("Impression", ":material/print:"),
-        ("Recherche", ":material/search:"),
-        ("Importation", ":material/upload_file:"),
-        ("Variantes", ":material/style:"),
-        ("Commissions", ":material/percent:"),
-        ("Approbations", ":material/password:"),
-        ("Automatisation", ":material/notifications_active:"),
-        ("Propriétaire", ":material/leaderboard:"),
-    ]
-else:
-    pages = [("Caisse", ":material/point_of_sale:")]
-    if permissions["stock"]: pages.append(("Stock", ":material/inventory_2:"))
-    if permissions["returns"] and v3.v3_ready(): pages.append(("Retours V3", ":material/assignment_return:"))
-
-page_names = [name for name, _ in pages]
-if st.session_state.mobile_page not in page_names:
+    allowed += [route for route, _ in settings_pages]
+if st.session_state.mobile_page not in allowed:
     st.session_state.mobile_page = "Accueil" if is_admin else "Caisse"
-
+current = st.session_state.mobile_page
+active_section = next((name for name, routes in sections.items()
+                       if current in [route for route, _ in routes]), "Réglages")
 with st.sidebar:
-    st.header("Boutique Senegal")
-    st.caption("MENU")
-    with st.container(border=True, gap="small"):
-        for name, icon in pages:
-            if st.button(
-                name,
-                icon=icon,
-                type="primary" if st.session_state.mobile_page == name else "secondary",
-                key=f"mobile_menu_{name}",
-                width="stretch",
-            ):
-                st.session_state.mobile_page = name
-                st.rerun()
-    st.space("small")
+    st.header("Boutique Sénégal")
+    for name, routes in sections.items():
+        if st.button(name, key=f"simple_nav_{name}", width="stretch",
+                     type="primary" if name == active_section else "secondary"):
+            st.session_state.mobile_page = routes[0][0]
+            st.rerun()
+    if is_admin:
+        with st.expander("Réglages"):
+            for route, label in settings_pages:
+                if st.button(label, key=f"simple_settings_{route}", width="stretch"):
+                    st.session_state.mobile_page = route
+                    st.rerun()
     st.button("Se déconnecter", icon=":material/logout:", on_click=sign_out, width="stretch")
 
+st.subheader(active_section)
+routes = settings_pages if active_section == "Réglages" else sections[active_section]
+if len(routes) > 1:
+    route_labels = dict(routes)
+    route_names = list(route_labels)
+    selected = st.radio("Afficher", route_names, index=route_names.index(current),
+                        format_func=route_labels.get, horizontal=True,
+                        key=f"simple_view_{active_section}_{current}", label_visibility="collapsed")
+    if selected != current:
+        st.session_state.mobile_page = selected
+        st.rerun()
 page = st.session_state.mobile_page
 
 if page == "Accueil":
@@ -190,6 +184,9 @@ if page == "Accueil":
         st.metric("Ventes", fcfa(float(summary.sales)))
         st.metric("Tickets", int(summary.transactions))
         st.metric("Alertes de stock", len(alerts))
+    purchases = db.expenses(date.today(), date.today())
+    purchase_total = float(purchases.loc[purchases.Libelle.str.startswith("Achat stock", na=False), "Montant"].sum()) if not purchases.empty else 0.0
+    st.metric("Achats de stock aujourd'hui", fcfa(purchase_total))
     st.subheader("Stock à surveiller", icon=":material/warning:")
     if alerts.empty:
         st.success("Aucune alerte de stock.")
@@ -215,7 +212,7 @@ elif page == "Caisse":
         if is_admin:
             sellers = db.sellers()
             if sellers.empty:
-                st.warning("Ajoutez un vendeur avant de vendre.")
+                st.warning("Ajoutez un vendeur dans Réglages → Vendeurs et comptes avant de vendre.")
                 st.stop()
             seller_map = dict(zip(sellers.Vendeur, sellers.id))
             seller_name = st.selectbox("Vendeur", list(seller_map))
@@ -414,23 +411,35 @@ elif page == "Achats":
                 except ValueError as error: st.error(str(error))
         st.dataframe(db.products(), hide_index=True)
 
-elif page == "Contacts":
-    st.header("Clients et fournisseurs", icon=":material/contacts:")
-    client_tab, supplier_tab = st.tabs(["Clients", "Fournisseurs"])
-    with client_tab:
-        with st.form("mobile_client"):
-            name = st.text_input("Nom du client"); phone = st.text_input("Téléphone"); email = st.text_input("E-mail"); address = st.text_input("Adresse")
-            if st.form_submit_button("Ajouter le client", type="primary"):
-                try: db.add_client(name, phone, email, address); st.success("Client ajouté.")
-                except Exception: st.error("Le nom du client est obligatoire et doit être unique.")
-        st.dataframe(db.clients(), hide_index=True)
-    with supplier_tab:
-        with st.form("mobile_supplier"):
-            name = st.text_input("Nom du fournisseur"); contact = st.text_input("Contact"); phone = st.text_input("Téléphone"); email = st.text_input("E-mail"); address = st.text_input("Adresse")
-            if st.form_submit_button("Ajouter le fournisseur", type="primary"):
-                try: db.add_supplier(name, contact, phone, email, address); st.success("Fournisseur ajouté.")
-                except Exception: st.error("Le nom du fournisseur est obligatoire et doit être unique.")
-        st.dataframe(db.suppliers(), hide_index=True)
+elif page == "Clients":
+    with st.form("mobile_client"):
+        name = st.text_input("Nom du client"); phone = st.text_input("Téléphone"); email = st.text_input("E-mail"); address = st.text_input("Adresse")
+        if st.form_submit_button("Ajouter le client", type="primary"):
+            try: db.add_client(name, phone, email, address); st.success("Client ajouté.")
+            except Exception: st.error("Le nom du client est obligatoire et doit être unique.")
+    st.dataframe(db.clients(), hide_index=True)
+
+elif page == "Fournisseurs":
+    with st.form("mobile_supplier"):
+        name = st.text_input("Nom du fournisseur"); contact = st.text_input("Contact"); phone = st.text_input("Téléphone"); email = st.text_input("E-mail"); address = st.text_input("Adresse")
+        if st.form_submit_button("Ajouter le fournisseur", type="primary"):
+            try: db.add_supplier(name, contact, phone, email, address); st.success("Fournisseur ajouté.")
+            except Exception: st.error("Le nom du fournisseur est obligatoire et doit être unique.")
+    st.dataframe(db.suppliers(), hide_index=True)
+    if v3.v3_ready():
+        orders = v3.purchase_orders()
+        if not orders.empty:
+            st.subheader("Commandes et sommes à payer")
+            supplier_name = st.selectbox("Filtrer par fournisseur", ["Tous"] + sorted(orders.Fournisseur.unique().tolist()))
+            if supplier_name != "Tous":
+                orders = orders[orders.Fournisseur == supplier_name]
+            st.metric("Reste à payer sur les commandes", fcfa(float(orders.Reste.sum())))
+            st.dataframe(orders, hide_index=True)
+            if st.button("Enregistrer un règlement fournisseur"):
+                st.session_state.mobile_page = "Commandes"
+                st.rerun()
+
+
 
 elif page == "Crédits":
     st.header("Crédits et historique clients", icon=":material/account_balance_wallet:")
@@ -444,7 +453,7 @@ elif page == "Crédits":
             reminder_labels={f"{r.Client} - ticket #{int(r.Ticket)} - {r.Statut}":r for _,r in alerts.iterrows()}; reminder_label=st.selectbox("Rappel WhatsApp",list(reminder_labels)); st.link_button("Envoyer le rappel WhatsApp",v3_ui.credit_reminder_link(reminder_labels[reminder_label]),icon=":material/send:",width="stretch")
     customers = db.clients()
     if customers.empty:
-        st.info("Ajoutez d'abord un client dans Contacts.")
+        st.info("Ajoutez d'abord un client dans la liste des clients.")
     else:
         customer_map = dict(zip(customers.Client, customers.id))
         customer_name = st.selectbox("Client", list(customer_map))
@@ -492,9 +501,13 @@ elif page == "Comptes":
                 except Exception: st.error("Le nom ou l'identifiant existe déjà.")
     st.dataframe(db.users(), hide_index=True)
 
-elif page == "Rapports":
-    st.header("Rapports", icon=":material/bar_chart:")
-    start, end = st.date_input("Période", value=(date.today(), date.today()))
+elif page in ("Rapports", "Historique"):
+    st.header("Historique des ventes" if page == "Historique" else "Rapports", icon=":material/bar_chart:")
+    period = st.date_input("Période", value=(date.today(), date.today()))
+    if len(period) != 2:
+        st.info("Sélectionnez une date de début et une date de fin.")
+        st.stop()
+    start, end = period
     sales = db.report(start, end)
     expenses = db.expenses(start, end)
     total_sales = float(sales.Total.sum()) if not sales.empty else 0.0
@@ -597,6 +610,39 @@ elif page == "Sécurité":
 elif page == "Paramètres":
     v2_ui.settings_page(user)
 
+elif page == "Factures":
+    from business_pdf import make_business_document_pdf
+    st.caption("Téléchargez une facture à partir d'une vente enregistrée, sans ressaisir les produits.")
+    period = st.date_input("Période des ventes", value=(date.today().replace(day=1), date.today()))
+    if len(period) != 2:
+        st.info("Sélectionnez une date de début et une date de fin.")
+        st.stop()
+    sales = db.report(*period)
+    if sales.empty:
+        st.info("Aucune vente sur cette période.")
+    else:
+        labels = {f"Vente #{int(r.Ticket)} · {r.Client} · {fcfa(r.Total)}": r
+                  for _, r in sales.iterrows()}
+        selected = st.selectbox("Vente à facturer", list(labels))
+        row = labels[selected]
+        sale_id = int(row.Ticket)
+        sale, items = db.sale_details(sale_id)
+        st.dataframe(items, hide_index=True)
+        total = float(sale["total"])
+        paid = float(sale["paid"])
+        remaining = max(total - paid, 0)
+        st.metric("Total", fcfa(total))
+        st.metric("Reste à payer", fcfa(remaining))
+        document = {"id": f"VENTE-{sale_id:06d}", "Type": "FACTURE",
+                    "Date": sale["created_at"], "Client": row.Client, "Total": total,
+                    "Notes": f"Remise : {fcfa(sale['discount'])}. Payé : {fcfa(min(paid, total))}. "
+                             f"Reste à payer : {fcfa(remaining)}. Paiement : {sale['payment_method']}."}
+        pdf = make_business_document_pdf(document, items, db.get_settings() if db.v2_ready() else {})
+        st.download_button("Télécharger la facture PDF", pdf,
+                           file_name=f"facture_vente_{sale_id:06d}.pdf", mime="application/pdf",
+                           icon=":material/download:")
+        st.caption("Pour imprimer : ouvrez le PDF puis choisissez Imprimer.")
+
 elif page == "Documents":
     v3_ui.documents_page(user)
 
@@ -644,3 +690,5 @@ elif page == "Propriétaire":
 
 elif page == "Stock":
     v3_ui.stock_readonly_page()
+
+
