@@ -30,6 +30,13 @@ def build_document(document, story, settings=None):
         lines.append(escape(address).replace("\n", "<br/>"))
     if phone:
         lines.append("Tél. : " + escape(phone))
+    legal = " - ".join(
+        f"{label} : {escape(str(settings[key]).strip())}"
+        for key, label in (("ninea", "NINEA"), ("rccm", "RCCM"))
+        if str(settings.get(key) or "").strip()
+    )
+    if legal:
+        lines.append(legal)
     contact = Paragraph("<br/>".join(lines), ParagraphStyle(
         "ShopFooter", fontName="Helvetica", fontSize=8, leading=10,
         alignment=1, textColor=colors.HexColor("#555555"),

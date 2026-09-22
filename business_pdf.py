@@ -31,9 +31,6 @@ def make_business_document_pdf(document: dict, items: pd.DataFrame, settings: di
     green=colors.HexColor("#12372A"); small=ParagraphStyle("small",parent=styles["Normal"],fontSize=9,leading=12)
     story=logo_flowables() + [Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("shop",parent=styles["Title"],textColor=green,fontSize=18,leading=22)),Spacer(1,2*mm)]
     story.extend([Spacer(1,7*mm),Paragraph(title,ParagraphStyle("doctype",parent=styles["Heading1"],alignment=TA_RIGHT,textColor=green,fontSize=20))])
-    legal = " - ".join(f"{label} : {escape(str(settings[key]))}" for key,label in (("ninea","NINEA"),("rccm","RCCM")) if settings.get(key))
-    if legal:
-        story.append(Paragraph(legal, small))
     number=document.get("id",document.get("Numero","")); created=str(document.get("created_at",document.get("Date",date.today().isoformat())))[:10]
     client=escape(str(document.get("Client",document.get("client","Comptant")) or "Comptant")); valid=document.get("valid_until",document.get("Validite","")) or ""
     meta=[["Numéro",f"#{number}"],["Date",created],["Fournisseur" if kind=="BON_COMMANDE" else "Client",Paragraph(client,small)]]
