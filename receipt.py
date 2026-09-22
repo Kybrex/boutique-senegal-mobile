@@ -4,7 +4,7 @@ from html import escape
 from io import BytesIO
 
 import pandas as pd
-from branding import logo_flowables, logo_data_uri
+from branding import build_document, logo_flowables, logo_data_uri
 
 def make_receipt(ticket: int, cart: list[dict], seller: str, client: str, gross: float, discount: float, total: float, paid: float, payment: str, settings: dict | None = None) -> str:
     settings = settings or {}
@@ -31,7 +31,7 @@ def make_receipt_pdf(ticket: int, cart: list[dict], seller: str, client: str, gr
     document = SimpleDocTemplate(output, pagesize=A6, leftMargin=18, rightMargin=18, topMargin=14, bottomMargin=18)
     story = logo_flowables(100)
     story.append(Paragraph(escape(str(settings.get("shop_name", "Boutique Senegal"))), center))
-    for value in (settings.get("address", ""), settings.get("phone", ""), f"Ticket #{ticket} - {datetime.now():%d/%m/%Y %H:%M}", f"Vendeur: {seller}", f"Client: {client}"):
+    for value in (f"Ticket #{ticket} - {datetime.now():%d/%m/%Y %H:%M}", f"Vendeur: {seller}", f"Client: {client}"):
         if value:
             story.append(Paragraph(escape(str(value)), center))
     story.append(Spacer(1, 8))
@@ -47,7 +47,7 @@ def make_receipt_pdf(ticket: int, cart: list[dict], seller: str, client: str, gr
     story.append(Paragraph(escape(f"Paiement: {payment}"), center))
     story.append(Spacer(1, 8))
     story.append(Paragraph(escape(str(settings.get("receipt_footer", "Merci pour votre achat !"))), center))
-    document.build(story)
+    build_document(document, story, settings)
     return output.getvalue()
 
 
@@ -68,12 +68,7 @@ def make_inventory_pdf(stock: pd.DataFrame, settings: dict | None = None) -> byt
     product_style = ParagraphStyle("InventoryProduct", parent=small, fontSize=8.5, leading=10)
     document = SimpleDocTemplate(output, pagesize=A4, rightMargin=12*mm, leftMargin=12*mm, topMargin=13*mm, bottomMargin=13*mm, title="Fiche d'inventaire")
     shop = escape(str(settings.get("shop_name", "Boutique Senegal")))
-    address = escape(str(settings.get("address", "")))
-    phone = escape(str(settings.get("phone", "")))
     story = logo_flowables() + [Paragraph(shop, title_style), Spacer(1, 2*mm), Paragraph("FICHE D'INVENTAIRE PHYSIQUE", ParagraphStyle("InventorySubtitle", parent=styles["Heading2"], alignment=TA_CENTER, fontSize=11, leading=14))]
-    contact = " - ".join(value for value in (address, phone) if value)
-    if contact:
-        story.append(Paragraph(contact, ParagraphStyle("InventoryContact", parent=small, alignment=TA_CENTER)))
     story.extend([Spacer(1, 4*mm), Paragraph(f"Date : {datetime.now():%d/%m/%Y} &nbsp;&nbsp;&nbsp;&nbsp; Responsable : ______________________________", styles["Normal"]), Spacer(1, 4*mm)])
 
     rows = [["N°", "Produit", "Catégorie", "Code-barres", "Stock\nsystème", "Stock\ncompté", "Écart", "Observation"]]
@@ -101,11 +96,5 @@ def make_inventory_pdf(stock: pd.DataFrame, settings: dict | None = None) -> byt
     ]))
     story.append(table)
 
-    def footer(canvas, doc):
-        canvas.saveState(); canvas.setFont("Helvetica", 8); canvas.setFillColor(colors.HexColor("#666666"))
-        canvas.drawString(12*mm, 7*mm, "Boutique Senegal - Inventaire physique")
-        canvas.drawRightString(A4[0]-12*mm, 7*mm, f"Page {doc.page}")
-        canvas.restoreState()
-
-    document.build(story, onFirstPage=footer, onLaterPages=footer)
+    build_document(document, story, settings)
     return output.getvalue()

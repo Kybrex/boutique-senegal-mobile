@@ -6,21 +6,12 @@ from html import escape
 from io import BytesIO
 
 import pandas as pd
-from branding import logo_flowables, logo_data_uri
+from branding import build_document, logo_flowables, logo_data_uri
 
 
 def _money(value: float) -> str:
     return f"{float(value):,.0f} FCFA".replace(",", " ")
 
-
-def _footer(canvas, doc) -> None:
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.units import mm
-    canvas.saveState(); canvas.setFont("Helvetica", 8); canvas.setFillColor(colors.HexColor("#666666"))
-    canvas.drawString(15*mm, 8*mm, "Boutique Senegal")
-    canvas.drawRightString(A4[0]-15*mm, 8*mm, f"Page {doc.page}")
-    canvas.restoreState()
 
 
 def make_business_document_pdf(document: dict, items: pd.DataFrame, settings: dict | None = None) -> bytes:
@@ -39,8 +30,6 @@ def make_business_document_pdf(document: dict, items: pd.DataFrame, settings: di
     doc = SimpleDocTemplate(output, pagesize=A4, leftMargin=15*mm, rightMargin=15*mm, topMargin=14*mm, bottomMargin=16*mm, title=title)
     green=colors.HexColor("#12372A"); small=ParagraphStyle("small",parent=styles["Normal"],fontSize=9,leading=12)
     story=logo_flowables() + [Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("shop",parent=styles["Title"],textColor=green,fontSize=18,leading=22)),Spacer(1,2*mm)]
-    contact=" - ".join(escape(str(v)) for v in (settings.get("address",""),settings.get("phone","")) if v)
-    if contact: story.append(Paragraph(contact,small))
     story.extend([Spacer(1,7*mm),Paragraph(title,ParagraphStyle("doctype",parent=styles["Heading1"],alignment=TA_RIGHT,textColor=green,fontSize=20))])
     number=document.get("id",document.get("Numero","")); created=str(document.get("created_at",document.get("Date",date.today().isoformat())))[:10]
     client=escape(str(document.get("Client",document.get("client","Comptant")) or "Comptant")); valid=document.get("valid_until",document.get("Validite","")) or ""
@@ -58,7 +47,7 @@ def make_business_document_pdf(document: dict, items: pd.DataFrame, settings: di
     notes=str(document.get("notes",document.get("Notes","")) or "")
     if notes: story.extend([Spacer(1,8*mm),Paragraph("Notes",styles["Heading3"]),Paragraph(escape(notes),small)])
     story.extend([Spacer(1,15*mm),Paragraph("Signature / Cachet : _________________________________",small)])
-    doc.build(story,onFirstPage=_footer,onLaterPages=_footer); return output.getvalue()
+    build_document(doc, story, settings); return output.getvalue()
 
 
 def make_product_list_pdf(products: pd.DataFrame, settings: dict | None = None) -> bytes:
@@ -78,4 +67,4 @@ def make_product_list_pdf(products: pd.DataFrame, settings: dict | None = None) 
     for i,(_,r) in enumerate(products.reset_index(drop=True).iterrows(),1): rows.append([str(i),Paragraph(escape(str(r.get("Produit",""))),small),Paragraph(escape(str(r.get("Categorie","") or "")),small),str(r.get("Code_barres","") or ""),_money(r.get("Achat",0)),_money(r.get("Vente",0)),str(int(r.get("Stock",0))),str(int(r.get("Minimum",0)))])
     table=Table(rows,colWidths=[8*mm,42*mm,27*mm,32*mm,25*mm,25*mm,13*mm,16*mm],repeatRows=1)
     table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),green),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),7),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#888888")),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("ALIGN",(4,1),(-1,-1),"RIGHT"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F3F7F4")]),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)])); story.append(table)
-    doc.build(story,onFirstPage=_footer,onLaterPages=_footer); return output.getvalue()
+    build_document(doc, story, settings); return output.getvalue()

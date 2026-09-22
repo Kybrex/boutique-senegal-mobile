@@ -6,20 +6,12 @@ from html import escape
 from io import BytesIO
 
 import pandas as pd
-from branding import logo_flowables
+from branding import build_document, logo_flowables
 
 
 def _money(value) -> str:
     return f"{float(value or 0):,.0f} FCFA".replace(",", " ")
 
-
-def _footer(canvas, doc) -> None:
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.units import mm
-    canvas.saveState(); canvas.setFillColor(colors.HexColor("#666666")); canvas.setFont("Helvetica", 8)
-    canvas.drawString(12*mm, 8*mm, "Boutique Senegal V4")
-    canvas.drawRightString(A4[0]-12*mm, 8*mm, f"Page {doc.page}"); canvas.restoreState()
 
 
 def make_barcode_labels_pdf(products: pd.DataFrame, settings: dict | None = None) -> bytes:
@@ -46,7 +38,7 @@ def make_barcode_labels_pdf(products: pd.DataFrame, settings: dict | None = None
     while len(cells)%3: cells.append("")
     rows=[cells[i:i+3] for i in range(0,len(cells),3)] or [[""]]
     table=Table(rows,colWidths=[65*mm]*3,rowHeights=[34*mm]*len(rows)); table.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"),("ALIGN",(0,0),(-1,-1),"CENTER")]))
-    doc.build([table]); return output.getvalue()
+    build_document(doc, [table], settings); return output.getvalue()
 
 
 def make_statement_pdf(title: str, party: dict, rows: pd.DataFrame, settings: dict | None = None) -> bytes:
@@ -68,7 +60,7 @@ def make_statement_pdf(title: str, party: dict, rows: pd.DataFrame, settings: di
     if not columns: data=[["Aucun mouvement"]]
     widths=[(A4[0]-24*mm)/max(1,len(data[0]))]*len(data[0]); table=Table(data,colWidths=widths,repeatRows=1)
     table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),green),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),7.5),("GRID",(0,0),(-1,-1),.35,colors.HexColor("#999999")),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F3F7F4")]),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
-    story.append(table); doc.build(story,onFirstPage=_footer,onLaterPages=_footer); return output.getvalue()
+    story.append(table); build_document(doc, story, settings); return output.getvalue()
 
 
 def make_catalog_pdf(products: pd.DataFrame, settings: dict | None = None) -> bytes:
@@ -82,7 +74,7 @@ def make_catalog_pdf(products: pd.DataFrame, settings: dict | None = None) -> by
 
     settings=settings or {}; output=BytesIO(); styles=getSampleStyleSheet(); green=colors.HexColor("#12372A")
     doc=SimpleDocTemplate(output,pagesize=A4,leftMargin=12*mm,rightMargin=12*mm,topMargin=12*mm,bottomMargin=16*mm,title="Catalogue produits")
-    story=logo_flowables() + [Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("shop",parent=styles["Title"],textColor=green,alignment=TA_CENTER)),Paragraph("CATALOGUE PRODUITS",ParagraphStyle("sub",parent=styles["Heading2"],alignment=TA_CENTER)),Paragraph(escape(str(settings.get("phone", ""))),ParagraphStyle("contact",parent=styles["Normal"],alignment=TA_CENTER)),Spacer(1,6*mm)]
+    story=logo_flowables() + [Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("shop",parent=styles["Title"],textColor=green,alignment=TA_CENTER)),Paragraph("CATALOGUE PRODUITS",ParagraphStyle("sub",parent=styles["Heading2"],alignment=TA_CENTER)),Spacer(1,6*mm)]
     cards=[]
     for _,r in products.iterrows():
         text=f"<b>{escape(str(r.get('Produit','')))}</b><br/>{escape(str(r.get('Categorie','') or ''))}<br/><font color='#12372A' size='13'><b>{_money(r.get('Vente',0))}</b></font>"
@@ -90,4 +82,4 @@ def make_catalog_pdf(products: pd.DataFrame, settings: dict | None = None) -> by
     while len(cards)%2: cards.append("")
     rows=[cards[i:i+2] for i in range(0,len(cards),2)] or [[Paragraph("Aucun produit",styles["Normal"]),""]]
     table=Table(rows,colWidths=[91*mm,91*mm]); table.setStyle(TableStyle([("BOX",(0,0),(-1,-1),.6,colors.HexColor("#AAAAAA")),("INNERGRID",(0,0),(-1,-1),.4,colors.HexColor("#DDDDDD")),("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#F8FBF9")),("VALIGN",(0,0),(-1,-1),"TOP"),("TOPPADDING",(0,0),(-1,-1),8*mm),("BOTTOMPADDING",(0,0),(-1,-1),8*mm),("LEFTPADDING",(0,0),(-1,-1),5*mm)])); story.append(table)
-    doc.build(story,onFirstPage=_footer,onLaterPages=_footer); return output.getvalue()
+    build_document(doc, story, settings); return output.getvalue()
