@@ -4,38 +4,51 @@ from html import escape
 from io import BytesIO
 
 import pandas as pd
+from branding import logo_flowables, logo_data_uri
 
 def make_receipt(ticket: int, cart: list[dict], seller: str, client: str, gross: float, discount: float, total: float, paid: float, payment: str, settings: dict | None = None) -> str:
     settings = settings or {}
     shop = escape(str(settings.get("shop_name", "Boutique Senegal")))
     phone = escape(str(settings.get("phone", "")))
     address = escape(str(settings.get("address", "")))
-    logo_url = escape(str(settings.get("logo_url", "")), quote=True)
+    logo_url = logo_data_uri()
     footer = escape(str(settings.get("receipt_footer", "Merci pour votre achat !")))
     contact = "<br>".join(value for value in (address, phone) if value)
-    logo = f"<p><img src='{logo_url}' alt='Logo' style='max-width:90px;max-height:70px'></p>" if logo_url else ""
+    logo = f"<p><img src='{logo_url}' alt='Logo' style='max-width:150px;height:auto'></p>" if logo_url else ""
     lines = "".join(f"<tr><td>{escape(str(item['name']))} x{item['quantity']}</td><td>{item['quantity'] * item['sale_price']:,.0f} FCFA</td></tr>" for item in cart)
     return f"""<!doctype html><html><head><meta charset='utf-8'><style>body{{font-family:Arial;max-width:320px;margin:auto}}h2,p{{text-align:center}}table{{width:100%;border-collapse:collapse}}td{{padding:5px;border-bottom:1px dashed #aaa}}.total{{font-size:18px;font-weight:bold}}</style></head><body>{logo}<h2>{shop}</h2><p>{contact}</p><p>Ticket #{ticket}<br>{datetime.now():%d/%m/%Y %H:%M}<br>Vendeur: {escape(seller)}<br>Client: {escape(client)}</p><table>{lines}</table><p>Sous-total: {gross:,.0f} FCFA<br>Reduction: {discount:,.0f} FCFA</p><p class='total'>TOTAL: {total:,.0f} FCFA</p><p>Verse: {paid:,.0f} FCFA<br>Monnaie: {paid-total:,.0f} FCFA<br>Paiement: {escape(payment)}</p><p>{footer}</p></body></html>"""
 
 
 def make_receipt_pdf(ticket: int, cart: list[dict], seller: str, client: str, gross: float, discount: float, total: float, paid: float, payment: str, settings: dict | None = None) -> bytes:
     from reportlab.lib.pagesizes import A6
-    from reportlab.pdfgen import canvas
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
     settings = settings or {}
-    output = BytesIO(); pdf = canvas.Canvas(output, pagesize=A6); width, height = A6; y = height - 28
-    pdf.setFont("Helvetica-Bold", 14); pdf.drawCentredString(width/2, y, str(settings.get("shop_name", "Boutique Senegal"))); y -= 18
-    pdf.setFont("Helvetica", 8)
+    output = BytesIO()
+    styles = getSampleStyleSheet()
+    center = ParagraphStyle("ReceiptCenter", parent=styles["Normal"], alignment=1, fontSize=8, leading=11)
+    small = ParagraphStyle("ReceiptItem", parent=styles["Normal"], fontSize=8, leading=11)
+    document = SimpleDocTemplate(output, pagesize=A6, leftMargin=18, rightMargin=18, topMargin=14, bottomMargin=18)
+    story = logo_flowables(100)
+    story.append(Paragraph(escape(str(settings.get("shop_name", "Boutique Senegal"))), center))
     for value in (settings.get("address", ""), settings.get("phone", ""), f"Ticket #{ticket} - {datetime.now():%d/%m/%Y %H:%M}", f"Vendeur: {seller}", f"Client: {client}"):
-        if value: pdf.drawCentredString(width/2, y, str(value)); y -= 11
-    y -= 4
-    for item in cart:
-        pdf.drawString(18, y, f"{item['name']} x{item['quantity']}"); pdf.drawRightString(width-18, y, f"{item['quantity']*item['sale_price']:,.0f}"); y -= 12
-    y -= 4; pdf.line(18,y,width-18,y); y -= 14
-    for label,value in (("Sous-total",gross),("Reduction",discount),("TOTAL",total),("Verse",paid),("Monnaie",paid-total)):
-        pdf.drawString(18,y,label); pdf.drawRightString(width-18,y,f"{value:,.0f} FCFA"); y -= 12
-    pdf.drawCentredString(width/2,y-4,f"Paiement: {payment}"); y -= 24
-    pdf.drawCentredString(width/2,y,str(settings.get("receipt_footer", "Merci pour votre achat !")))
-    pdf.save(); return output.getvalue()
+        if value:
+            story.append(Paragraph(escape(str(value)), center))
+    story.append(Spacer(1, 8))
+    rows = [[Paragraph(escape(f"{item['name']} x{item['quantity']}"), small),
+             Paragraph(f"{item['quantity']*item['sale_price']:,.0f} FCFA", small)] for item in cart]
+    if rows:
+        table = Table(rows, colWidths=[document.width * .62, document.width * .38])
+        table.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("BOTTOMPADDING", (0,0), (-1,-1), 5)]))
+        story.append(table)
+    story.append(Spacer(1, 8))
+    for label, value in (("Sous-total",gross),("Reduction",discount),("TOTAL",total),("Verse",paid),("Monnaie",paid-total)):
+        story.append(Paragraph(f"{label}: {value:,.0f} FCFA", center))
+    story.append(Paragraph(escape(f"Paiement: {payment}"), center))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(escape(str(settings.get("receipt_footer", "Merci pour votre achat !"))), center))
+    document.build(story)
+    return output.getvalue()
 
 
 def make_inventory_pdf(stock: pd.DataFrame, settings: dict | None = None) -> bytes:
@@ -57,7 +70,7 @@ def make_inventory_pdf(stock: pd.DataFrame, settings: dict | None = None) -> byt
     shop = escape(str(settings.get("shop_name", "Boutique Senegal")))
     address = escape(str(settings.get("address", "")))
     phone = escape(str(settings.get("phone", "")))
-    story = [Paragraph(shop, title_style), Spacer(1, 2*mm), Paragraph("FICHE D'INVENTAIRE PHYSIQUE", ParagraphStyle("InventorySubtitle", parent=styles["Heading2"], alignment=TA_CENTER, fontSize=11, leading=14))]
+    story = logo_flowables() + [Paragraph(shop, title_style), Spacer(1, 2*mm), Paragraph("FICHE D'INVENTAIRE PHYSIQUE", ParagraphStyle("InventorySubtitle", parent=styles["Heading2"], alignment=TA_CENTER, fontSize=11, leading=14))]
     contact = " - ".join(value for value in (address, phone) if value)
     if contact:
         story.append(Paragraph(contact, ParagraphStyle("InventoryContact", parent=small, alignment=TA_CENTER)))

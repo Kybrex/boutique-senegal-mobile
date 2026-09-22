@@ -7,12 +7,16 @@ from __future__ import annotations
 from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
+from branding import LOGO_PATH
 
 from receipt import make_receipt, make_receipt_pdf
 import v2_ui
 
 
 st.set_page_config(page_title="Boutique Sénégal", page_icon=":material/storefront:", layout="centered")
+
+
+st.image(str(LOGO_PATH), width=220)
 
 
 def validate_supabase_secrets() -> str | None:
@@ -149,6 +153,7 @@ current = st.session_state.mobile_page
 active_section = next((name for name, routes in sections.items()
                        if current in [route for route, _ in routes]), "Réglages")
 with st.sidebar:
+    st.image(str(LOGO_PATH), width=180)
     st.header("Boutique Sénégal")
     for name, routes in sections.items():
         if st.button(name, key=f"simple_nav_{name}", width="stretch",

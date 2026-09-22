@@ -6,6 +6,7 @@ from html import escape
 from io import BytesIO
 
 import pandas as pd
+from branding import logo_flowables
 
 
 def _money(value) -> str:
@@ -60,7 +61,7 @@ def make_statement_pdf(title: str, party: dict, rows: pd.DataFrame, settings: di
     settings=settings or {}; output=BytesIO(); styles=getSampleStyleSheet(); green=colors.HexColor("#12372A")
     doc=SimpleDocTemplate(output,pagesize=A4,leftMargin=12*mm,rightMargin=12*mm,topMargin=12*mm,bottomMargin=16*mm,title=title)
     name=party.get("Client",party.get("Fournisseur",party.get("name",""))); phone=party.get("Telephone",party.get("phone",""))
-    story=[Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("shop",parent=styles["Title"],textColor=green,alignment=TA_CENTER)),Paragraph(escape(title.upper()),ParagraphStyle("head",parent=styles["Heading2"],alignment=TA_CENTER)),Spacer(1,4*mm),Paragraph(f"<b>Compte :</b> {escape(str(name))} &nbsp;&nbsp; <b>Téléphone :</b> {escape(str(phone or ''))}",styles["Normal"]),Paragraph(f"Édité le {datetime.now():%d/%m/%Y à %H:%M}",styles["Normal"]),Spacer(1,5*mm)]
+    story=logo_flowables() + [Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("shop",parent=styles["Title"],textColor=green,alignment=TA_CENTER)),Paragraph(escape(title.upper()),ParagraphStyle("head",parent=styles["Heading2"],alignment=TA_CENTER)),Spacer(1,4*mm),Paragraph(f"<b>Compte :</b> {escape(str(name))} &nbsp;&nbsp; <b>Téléphone :</b> {escape(str(phone or ''))}",styles["Normal"]),Paragraph(f"Édité le {datetime.now():%d/%m/%Y à %H:%M}",styles["Normal"]),Spacer(1,5*mm)]
     columns=list(rows.columns); data=[columns]
     for _,row in rows.iterrows():
         data.append([escape(str(row[c])) if not isinstance(row[c],float) else _money(row[c]) for c in columns])
@@ -81,7 +82,7 @@ def make_catalog_pdf(products: pd.DataFrame, settings: dict | None = None) -> by
 
     settings=settings or {}; output=BytesIO(); styles=getSampleStyleSheet(); green=colors.HexColor("#12372A")
     doc=SimpleDocTemplate(output,pagesize=A4,leftMargin=12*mm,rightMargin=12*mm,topMargin=12*mm,bottomMargin=16*mm,title="Catalogue produits")
-    story=[Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("shop",parent=styles["Title"],textColor=green,alignment=TA_CENTER)),Paragraph("CATALOGUE PRODUITS",ParagraphStyle("sub",parent=styles["Heading2"],alignment=TA_CENTER)),Paragraph(escape(str(settings.get("phone", ""))),ParagraphStyle("contact",parent=styles["Normal"],alignment=TA_CENTER)),Spacer(1,6*mm)]
+    story=logo_flowables() + [Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("shop",parent=styles["Title"],textColor=green,alignment=TA_CENTER)),Paragraph("CATALOGUE PRODUITS",ParagraphStyle("sub",parent=styles["Heading2"],alignment=TA_CENTER)),Paragraph(escape(str(settings.get("phone", ""))),ParagraphStyle("contact",parent=styles["Normal"],alignment=TA_CENTER)),Spacer(1,6*mm)]
     cards=[]
     for _,r in products.iterrows():
         text=f"<b>{escape(str(r.get('Produit','')))}</b><br/>{escape(str(r.get('Categorie','') or ''))}<br/><font color='#12372A' size='13'><b>{_money(r.get('Vente',0))}</b></font>"

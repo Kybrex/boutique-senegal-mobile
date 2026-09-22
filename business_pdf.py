@@ -6,6 +6,7 @@ from html import escape
 from io import BytesIO
 
 import pandas as pd
+from branding import logo_flowables, logo_data_uri
 
 
 def _money(value: float) -> str:
@@ -37,7 +38,7 @@ def make_business_document_pdf(document: dict, items: pd.DataFrame, settings: di
     title = titles.get(kind, kind.replace("_", " "))
     doc = SimpleDocTemplate(output, pagesize=A4, leftMargin=15*mm, rightMargin=15*mm, topMargin=14*mm, bottomMargin=16*mm, title=title)
     green=colors.HexColor("#12372A"); small=ParagraphStyle("small",parent=styles["Normal"],fontSize=9,leading=12)
-    story=[Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("shop",parent=styles["Title"],textColor=green,fontSize=18,leading=22)),Spacer(1,2*mm)]
+    story=logo_flowables() + [Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("shop",parent=styles["Title"],textColor=green,fontSize=18,leading=22)),Spacer(1,2*mm)]
     contact=" - ".join(escape(str(v)) for v in (settings.get("address",""),settings.get("phone","")) if v)
     if contact: story.append(Paragraph(contact,small))
     story.extend([Spacer(1,7*mm),Paragraph(title,ParagraphStyle("doctype",parent=styles["Heading1"],alignment=TA_RIGHT,textColor=green,fontSize=20))])
@@ -71,7 +72,7 @@ def make_product_list_pdf(products: pd.DataFrame, settings: dict | None = None) 
 
     settings=settings or {}; output=BytesIO(); styles=getSampleStyleSheet(); green=colors.HexColor("#12372A")
     doc=SimpleDocTemplate(output,pagesize=A4,leftMargin=12*mm,rightMargin=12*mm,topMargin=13*mm,bottomMargin=16*mm,title="Liste des produits")
-    story=[Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("title",parent=styles["Title"],alignment=TA_CENTER,textColor=green)),Paragraph("LISTE DES PRODUITS",ParagraphStyle("sub",parent=styles["Heading2"],alignment=TA_CENTER)),Paragraph(f"Imprimée le {datetime.now():%d/%m/%Y à %H:%M}",ParagraphStyle("date",parent=styles["Normal"],alignment=TA_CENTER)),Spacer(1,5*mm)]
+    story=logo_flowables() + [Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("title",parent=styles["Title"],alignment=TA_CENTER,textColor=green)),Paragraph("LISTE DES PRODUITS",ParagraphStyle("sub",parent=styles["Heading2"],alignment=TA_CENTER)),Paragraph(f"Imprimée le {datetime.now():%d/%m/%Y à %H:%M}",ParagraphStyle("date",parent=styles["Normal"],alignment=TA_CENTER)),Spacer(1,5*mm)]
     small=ParagraphStyle("cell",parent=styles["Normal"],fontSize=7.5,leading=9)
     rows=[["N°","Produit","Catégorie","Code-barres","Achat","Vente","Stock","Minimum"]]
     for i,(_,r) in enumerate(products.reset_index(drop=True).iterrows(),1): rows.append([str(i),Paragraph(escape(str(r.get("Produit",""))),small),Paragraph(escape(str(r.get("Categorie","") or "")),small),str(r.get("Code_barres","") or ""),_money(r.get("Achat",0)),_money(r.get("Vente",0)),str(int(r.get("Stock",0))),str(int(r.get("Minimum",0)))])
