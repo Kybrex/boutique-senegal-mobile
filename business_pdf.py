@@ -59,7 +59,7 @@ def make_business_document_pdf(document: dict, items: pd.DataFrame, settings: di
     totals=Table([[Paragraph("TOTAL",ParagraphStyle("total",parent=styles["Normal"],fontName="Helvetica-Bold",alignment=TA_RIGHT)),Paragraph(_money(total),ParagraphStyle("money",parent=styles["Normal"],fontName="Helvetica-Bold",alignment=TA_RIGHT,textColor=green,fontSize=13))]],colWidths=[130*mm,50*mm]); story.append(totals)
     notes=str(document.get("notes",document.get("Notes","")) or "")
     if notes: story.extend([Spacer(1,8*mm),Paragraph("Notes",styles["Heading3"]),Paragraph(escape(notes),small)])
-    story.extend([Spacer(1,15*mm),Paragraph("Signature / Cachet : _________________________________",small)])
+    story.extend([Spacer(1,15*mm),Paragraph("Signature / Cachet : _________________________________",ParagraphStyle("signature",parent=small,alignment=TA_RIGHT))])
     build_document(doc, story, settings); return output.getvalue()
 
 
