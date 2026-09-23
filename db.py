@@ -302,14 +302,13 @@ def dashboard(start: date, end: date) -> dict:
 
 BACKUP_TABLES = ["suppliers","sellers","clients","stores","products","users","sales","sale_items","expenses","shop_settings","store_stock","credit_payments","cash_closings","inventory_counts","stock_transfers","activity_logs","documents","document_items","purchase_orders","purchase_order_items","supplier_payments","returns","cash_movements","product_lots","offline_imports","product_variants","approval_logs","notification_events","backup_runs"]
 def backup_bundle() -> dict:
-    tables = {}
-    for table in BACKUP_TABLES:
-        frame = query(f"SELECT * FROM {table}")
-        tables[table] = json.loads(frame.to_json(orient="records", date_format="iso"))
-    return {"format":"boutique-senegal-backup","version":2,"created_at":datetime.now(timezone.utc).isoformat(),"tables":tables}
+    from business_features import complete_backup
+    return complete_backup()
 def restore_backup(bundle: dict) -> dict:
     from business_features import validate_backup
+    from workflow_service import restore_objects, restore_indexes
     validate_backup(bundle)
+    restore_objects(bundle)
     if bundle.get("format") != "boutique-senegal-backup" or int(bundle.get("version",0)) != 2: raise ValueError("Fichier de sauvegarde incompatible.")
     tables=bundle.get("tables");
     if not isinstance(tables,dict): raise ValueError("Sauvegarde invalide.")
@@ -326,6 +325,7 @@ def restore_backup(bundle: dict) -> dict:
                 cursor=conn.execute(f"INSERT OR IGNORE INTO {table} ({','.join(columns)}) VALUES ({placeholders})",tuple(values[c] for c in columns)); count += max(0,cursor.rowcount)
             restored[table]=count
         conn.commit()
+    restore_indexes(bundle)
     return restored
 
 # Sur Streamlit Cloud, les mêmes fonctions utilisent Supabase. En local, SQLite
@@ -365,5 +365,3 @@ try:
         backup_bundle = _cloud.backup_bundle; restore_backup = _cloud.restore_backup
 except Exception:
     pass
-
-

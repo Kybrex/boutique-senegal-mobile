@@ -54,6 +54,9 @@ import v4_db as v4
 import v4_ui
 import business_features as features
 import business_features_ui as features_ui
+import workflow_service as workflows
+import workflow_ui
+import session_guard
 
 db.init_db()
 st.session_state.setdefault("mobile_cart", [])
@@ -68,8 +71,7 @@ def fcfa(value: float) -> str:
 
 
 def sign_out() -> None:
-    st.session_state.pop("mobile_user", None)
-    st.session_state.mobile_cart = []
+    session_guard.clear_session()
     st.rerun()
 
 
@@ -95,9 +97,12 @@ if db.user_count() == 0:
                     st.error("Cet identifiant existe déjà.")
     st.stop()
 
+session_guard.gate()
 if "mobile_user" not in st.session_state:
     st.title("Boutique Senegal", icon=":material/storefront:")
     st.caption("Ventes, achats, stock et facturation")
+    if st.session_state.get('_lock_notice'):
+        st.info('Session verrouillée. Reconnectez-vous pour continuer.')
     with st.form("mobile_login"):
         # Browsers may override this hint for their saved-password manager.
         username = st.text_input("Nom d'utilisateur", autocomplete="off")
@@ -105,7 +110,9 @@ if "mobile_user" not in st.session_state:
         if st.form_submit_button("Se connecter", type="primary"):
             user = db.authenticate(username, password)
             if user:
+                session_guard.clear_session()
                 st.session_state.mobile_user = user
+                session_guard.start(user, workflows.preferences()['idle_minutes']*60)
                 st.session_state.mobile_page = "Accueil" if user["role"] == "admin" else "Caisse"
                 try:
                     if db.v2_ready(): db.log_action(int(user["id"]), "CONNEXION", user["display_name"])
@@ -116,6 +123,7 @@ if "mobile_user" not in st.session_state:
     st.stop()
 
 user = st.session_state.mobile_user
+session_guard.watch()
 is_admin = user["role"] == "admin"
 permissions = v3.user_permissions(user)
 st.title("Boutique Senegal", icon=":material/storefront:")
@@ -124,7 +132,7 @@ st.caption(f"{user['display_name']} · {'Administrateur' if is_admin else 'Vende
 if is_admin and v4.v4_ready() and not st.session_state.get("v4_session_tasks_done"):
     try:
         st.session_state.v4_notifications=v4.refresh_notifications()
-        st.session_state.v4_backup_status=v4.automatic_backup_if_due()
+        st.session_state.v4_backup_status=v4.automatic_backup_if_due(user)
     except Exception as error:
         st.session_state.v4_backup_status=f"indisponible: {str(error)[:120]}"
     st.session_state.v4_session_tasks_done=True
@@ -133,11 +141,11 @@ if is_admin and v4.v4_ready() and not st.session_state.get("v4_session_tasks_don
 sections = {
     "Tableau de bord": [("Accueil", "Vue d'ensemble"), ("Rapports", "Rapports et dépenses"), ("Bénéfice", "Bénéfice")],
     "Ventes": [("Caisse", "Nouvelle vente"), ("Historique", "Historique"), ("Retours V3", "Retours")],
-    "Achats": [("Achats", "Achat reçu"), ("Commandes", "Commandes et règlements")],
+    "Achats": [("Achats", "Achat reçu"), ("Commandes", "Commandes et règlements"), ("Justificatifs", "Justificatifs")],
     "Stock": [("Produits", "Produits et quantités"), ("Inventaire", "Inventaire"), ("Réapprovisionnement", "À commander")],
     "Fournisseurs": [("Fournisseurs", "Fournisseurs"), ("Dettes fournisseurs", "Sommes à payer")],
-    "Clients": [("Clients", "Liste des clients"), ("Crédits", "Historique et crédits"), ("Dettes clients", "Impayés et échéances")],
-    "Facturation": [("Factures", "Factures des ventes"), ("Documents", "Devis et autres documents")],
+    "Clients": [("Clients", "Liste des clients"), ("Fiche client", "Fiche complète"), ("Crédits", "Historique et crédits"), ("Dettes clients", "Impayés et échéances")],
+    "Facturation": [("Factures", "Factures des ventes"), ("Archives factures", "Factures émises"), ("Documents", "Devis et autres documents")],
 }
 if not is_admin:
     sections = {"Ventes": [("Caisse", "Nouvelle vente")]}
@@ -169,6 +177,8 @@ with st.sidebar:
                 if st.button(label, key=f"simple_settings_{route}", width="stretch"):
                     st.session_state.mobile_page = route
                     st.rerun()
+    st.button("Verrouiller maintenant", icon=":material/lock:", on_click=session_guard.manual_lock, width="stretch")
+    st.caption(f"Verrouillage après {int(st.session_state.get('_auth_timeout',300)//60)} min sans activité.")
     st.button("Se déconnecter", icon=":material/logout:", on_click=sign_out, width="stretch")
 
 if is_admin:
@@ -197,8 +207,15 @@ elif page == "Dettes clients":
 elif page == "Dettes fournisseurs":
     features_ui.debts_page(user, "fournisseurs")
 elif page == "Sauvegardes":
-    features_ui.backups_page(user)
+    workflow_ui.backups_page(user)
+elif page == "Archives factures":
+    workflow_ui.archive_page(user)
+elif page == "Justificatifs":
+    workflow_ui.attachments_page(user)
+elif page == "Fiche client":
+    workflow_ui.client_page(user)
 elif page == "Accueil":
+    workflow_ui.backup_reminder(user)
     summary = db.today_summary().iloc[0]
     alerts = db.low_stock()
     st.header("Aujourd'hui", icon=":material/today:")
@@ -634,6 +651,7 @@ elif page == "Boutiques":
 
 elif page == "Sécurité":
     v2_ui.security_page(user)
+    workflow_ui.preferences_panel(user)
 
 elif page == "Paramètres":
     v2_ui.settings_page(user)
@@ -669,16 +687,7 @@ elif page == "Factures":
                 if st.form_submit_button("Enregistrer l’échéance de la facture"):
                     db.set_credit_due_date(sale_id, due)
                     st.rerun()
-        document = {"id": features.invoice_number(sale_id), "Type": "FACTURE",
-                    "paid": paid, "due_date": sale.get("due_date"),
-                    "Date": sale["created_at"], "Client": row.Client, "Total": total,
-                    "Notes": f"Remise : {fcfa(sale['discount'])}." if float(sale['discount']) else ""}
-        paper_format = st.radio("Format d’impression", ["A4", "A5"], horizontal=True, key="sale_invoice_paper_format")
-        pdf = make_business_document_pdf(document, items, dict(db.get_settings() if db.v2_ready() else {}, **features.invoice_settings()), paper_format=paper_format)
-        st.download_button("Télécharger la facture PDF", pdf,
-                           file_name=f"facture_vente_{sale_id:06d}_{paper_format}.pdf", mime="application/pdf",
-                           icon=":material/download:")
-        st.caption(f"Pour imprimer : ouvrez le PDF, choisissez le papier {paper_format} et l’échelle Taille réelle (100 %).")
+        workflow_ui.invoice_panel('VENTE', sale_id, user)
 
 elif page == "Documents":
     v3_ui.documents_page(user)
@@ -727,4 +736,3 @@ elif page == "Propriétaire":
 
 elif page == "Stock":
     v3_ui.stock_readonly_page()
-

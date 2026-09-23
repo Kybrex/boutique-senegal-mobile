@@ -376,7 +376,9 @@ def backup_bundle():
     return complete_backup()
 def restore_backup(bundle):
     from business_features import validate_backup, records
+    from workflow_service import restore_objects, restore_indexes
     validate_backup(bundle)
+    restore_objects(bundle)
     if bundle.get("format")!="boutique-senegal-backup" or int(bundle.get("version",0))!=2: raise ValueError("Fichier de sauvegarde incompatible.")
     tables=bundle.get("tables")
     if not isinstance(tables,dict): raise ValueError("Sauvegarde invalide.")
@@ -398,6 +400,5 @@ def restore_backup(bundle):
                 raise ValueError(f"Récupération interrompue dans {table}. Certaines lignes ont déjà été ajoutées.") from error
         restored[table]=count; skipped[table]=ignored
     client().rpc("sync_boutique_sequences").execute()
+    restore_indexes(bundle)
     return {"restored":restored,"skipped":skipped}
-
-

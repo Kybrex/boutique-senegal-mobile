@@ -263,20 +263,39 @@ def refresh_notifications() -> pd.DataFrame:
     return _frame([{"Date":r.get("created_at",""),"Niveau":r.get("severity",""),"Categorie":r.get("category",""),"Alerte":r.get("title",""),"Details":r.get("details","")} for r in rows],["Date","Niveau","Categorie","Alerte","Details"])
 
 
-def automatic_backup_if_due() -> str:
+def automatic_backup_if_due(user=None) -> str:
     """Crée au plus une sauvegarde automatique selon la fréquence configurée."""
-    days=approval_settings()["backup_days"]
+    import workflow_service as service
+    import business_features as features
+    if not user or user.get('role') != 'admin':
+        return 'réservée à l’administrateur'
+    days=service.preferences()['backup_days']
     try:
         if _cloud(): recent=_rows(cloud._table("backup_runs").select("created_at,status").eq("status","OK").order("created_at",desc=True).limit(1).execute())
         else: recent=json.loads(db.query("SELECT created_at,status FROM backup_runs WHERE status='OK' ORDER BY created_at DESC LIMIT 1").to_json(orient="records"))
         if recent and datetime.fromisoformat(str(recent[0]["created_at"]).replace("Z","+00:00")).date() >= date.today()-timedelta(days=max(1,days)): return "à jour"
-        bundle=db.backup_bundle(); payload=json.dumps(bundle,ensure_ascii=False,default=str).encode("utf-8"); path=f"boutique-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}.json"
+        bundle=features.complete_backup()
+        features.validate_backup(bundle)
+        payload=service.encode(bundle)
+        if len(payload)>48*1024*1024:
+            raise ValueError('Copie automatique trop volumineuse ; préparez une copie manuelle.')
+        from uuid import uuid4
+        path=f"boutique-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-{uuid4().hex[:8]}.json"
         if _cloud():
-            cloud.client().storage.from_("automatic-backups").upload(path,payload,{"content-type":"application/json","upsert":"false"}); cloud._table("backup_runs").insert({"storage_path":path,"row_count":sum(len(v) for v in bundle["tables"].values()),"status":"OK"}).execute()
+            bucket=service._bucket()
+            bucket.upload(path,payload,{"content-type":"application/json","upsert":"false"})
+            if service.digest(bytes(bucket.download(path))) != service.digest(payload):
+                raise ValueError('Contrôle de la copie automatique échoué.')
+            cloud._table("backup_runs").insert({"storage_path":path,"row_count":sum(len(v) for v in bundle["tables"].values()),"status":"OK","details":"Contenu et documents privés contrôlés"}).execute()
         else:
-            folder=Path(__file__).parent/"backups"; folder.mkdir(exist_ok=True); (folder/path).write_bytes(payload); db.execute("INSERT INTO backup_runs(storage_path,row_count,status) VALUES(?,?,?)",(str(folder/path),sum(len(v) for v in bundle["tables"].values()),"OK"))
-        return "créée"
-    except Exception as error: return f"indisponible: {str(error)[:140]}"
+            folder=Path(db.DB_PATH).parent/"backups"; folder.mkdir(exist_ok=True); (folder/path).write_bytes(payload)
+            if service.digest((folder/path).read_bytes()) != service.digest(payload):
+                raise ValueError('Contrôle de la copie automatique échoué.')
+            db.execute("INSERT INTO backup_runs(storage_path,row_count,status) VALUES(?,?,?)",(str(folder/path),sum(len(v) for v in bundle["tables"].values()),"OK"))
+        service.record_backup('automatic_verified',service.digest(payload),bundle['created_at'],user)
+        return "créée et vérifiée"
+    except Exception:
+        return "indisponible : préparez une copie manuelle dans les sauvegardes"
 
 
 def backup_history() -> pd.DataFrame:

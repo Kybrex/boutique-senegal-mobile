@@ -196,9 +196,12 @@ def reorder_rows(days=30):
 
 def complete_backup():
     # Fail visibly if a table cannot be read rather than label an incomplete archive complete.
-    return {'format':'boutique-senegal-backup', 'version':2,
+    from workflow_service import backup_objects
+    bundle = {'format':'boutique-senegal-backup', 'version':2,
             'created_at':datetime.now(timezone.utc).isoformat(),
             'tables':{table:records(table) for table in db.BACKUP_TABLES}}
+    bundle['private_documents'] = backup_objects(bundle['tables'])
+    return bundle
 
 
 def validate_backup(bundle):
@@ -214,5 +217,6 @@ def validate_backup(bundle):
         identities = [tuple(r.get(k) for k in keys) for r in rows]
         if any(any(v is None for v in key) for key in identities) or len(set(identities)) != len(identities):
             raise ValueError('Identifiants manquants ou dupliqués : ' + table)
+    from workflow_service import validate_backup_objects
+    validate_backup_objects(bundle)
     return {table:len(rows) for table,rows in tables.items()}
-
