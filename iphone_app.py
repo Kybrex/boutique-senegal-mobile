@@ -99,8 +99,9 @@ if "mobile_user" not in st.session_state:
     st.title("Boutique Senegal", icon=":material/storefront:")
     st.caption("Ventes, achats, stock et facturation")
     with st.form("mobile_login"):
-        username = st.text_input("Nom d'utilisateur")
-        password = st.text_input("Mot de passe", type="password")
+        # Browsers may override this hint for their saved-password manager.
+        username = st.text_input("Nom d'utilisateur", autocomplete="off")
+        password = st.text_input("Mot de passe", type="password", autocomplete="off")
         if st.form_submit_button("Se connecter", type="primary"):
             user = db.authenticate(username, password)
             if user:
