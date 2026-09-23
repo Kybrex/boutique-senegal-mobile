@@ -62,8 +62,13 @@ def documents_page(user):
     history=v3.documents(); st.subheader("Documents enregistrés"); st.dataframe(history,hide_index=True,width="stretch")
     if not history.empty:
         labels={f"{r.Type} #{int(r.id)} - {r.Client} - {fcfa(r.Total)}":int(r.id) for _,r in history.iterrows()}; selected=st.selectbox("Ouvrir un document",list(labels)); doc_id=labels[selected]
-        document,items=v3.document_details(doc_id); pdf=make_business_document_pdf(document,items,dict(db.get_settings(), **features.invoice_settings()))
-        st.dataframe(items,hide_index=True,width="stretch"); st.download_button("Télécharger le PDF",pdf,file_name=f"document_{doc_id}.pdf",mime="application/pdf",icon=":material/picture_as_pdf:")
+        document,items=v3.document_details(doc_id)
+        is_invoice = str(document.get("Type", document.get("document_type", ""))).upper() == "FACTURE"
+        paper_format = st.radio("Format d’impression", ["A4", "A5"], horizontal=True, key="document_invoice_paper_format") if is_invoice else "A4"
+        pdf=make_business_document_pdf(document,items,dict(db.get_settings(), **features.invoice_settings()),paper_format=paper_format)
+        st.dataframe(items,hide_index=True,width="stretch"); st.download_button("Télécharger le PDF",pdf,file_name=f"document_{doc_id}_{paper_format}.pdf",mime="application/pdf",icon=":material/picture_as_pdf:")
+        if is_invoice:
+            st.caption(f"Pour imprimer : ouvrez le PDF, choisissez le papier {paper_format} et l’échelle Taille réelle (100 %).")
         cols=st.columns(2)
         if cols[0].button("Convertir en vente",type="primary"):
             st.session_state.mobile_cart=v3.document_cart(doc_id); st.session_state.mobile_page="Caisse"; v3.set_document_status(doc_id,"CONVERTI"); st.rerun()
@@ -204,5 +209,4 @@ def credit_reminder_link(row) -> str:
     digits="".join(c for c in str(row.Telephone) if c.isdigit()); status=str(row.Statut).replace("_"," ").lower()
     message=quote(f"Bonjour {row.Client}, rappel Boutique Senegal : le solde du ticket #{int(row.Ticket)} est de {fcfa(row.Reste)}. Échéance : {row.Echeance} ({status}). Merci.")
     return f"https://wa.me/{digits}?text={message}" if digits else f"https://wa.me/?text={message}"
-
 

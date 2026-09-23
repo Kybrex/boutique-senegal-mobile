@@ -671,13 +671,13 @@ elif page == "Factures":
         document = {"id": features.invoice_number(sale_id), "Type": "FACTURE",
                     "paid": paid, "due_date": sale.get("due_date"),
                     "Date": sale["created_at"], "Client": row.Client, "Total": total,
-                    "Notes": f"Remise : {fcfa(sale['discount'])}. Payé : {fcfa(min(paid, total))}. "
-                             f"Reste à payer : {fcfa(remaining)}. Paiement : {sale['payment_method']}."}
-        pdf = make_business_document_pdf(document, items, dict(db.get_settings() if db.v2_ready() else {}, **features.invoice_settings()))
+                    "Notes": f"Remise : {fcfa(sale['discount'])}." if float(sale['discount']) else ""}
+        paper_format = st.radio("Format d’impression", ["A4", "A5"], horizontal=True, key="sale_invoice_paper_format")
+        pdf = make_business_document_pdf(document, items, dict(db.get_settings() if db.v2_ready() else {}, **features.invoice_settings()), paper_format=paper_format)
         st.download_button("Télécharger la facture PDF", pdf,
-                           file_name=f"facture_vente_{sale_id:06d}.pdf", mime="application/pdf",
+                           file_name=f"facture_vente_{sale_id:06d}_{paper_format}.pdf", mime="application/pdf",
                            icon=":material/download:")
-        st.caption("Pour imprimer : ouvrez le PDF puis choisissez Imprimer.")
+        st.caption(f"Pour imprimer : ouvrez le PDF, choisissez le papier {paper_format} et l’échelle Taille réelle (100 %).")
 
 elif page == "Documents":
     v3_ui.documents_page(user)
@@ -726,7 +726,4 @@ elif page == "Propriétaire":
 
 elif page == "Stock":
     v3_ui.stock_readonly_page()
-
-
-
 
