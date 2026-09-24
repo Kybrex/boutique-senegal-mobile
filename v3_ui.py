@@ -115,6 +115,9 @@ def purchase_orders_page(user):
 def returns_page(user):
     if migration_required(): return
     st.header("Retours, échanges et remboursements",icon=":material/assignment_return:")
+    st.caption("Les articles retournés sont remis en stock. La dette éventuelle est réduite d’abord ; seul le trop-perçu est remboursé ou transformé en avoir. Pour un échange, enregistrez le retour puis la nouvelle vente séparément.")
+    if st.session_state.get("return_notice"):
+        st.success(st.session_state.pop("return_notice"))
     sales=db.report(date(2000,1,1),date.today())
     if sales.empty: st.info("Aucune vente disponible."); return
     labels={f"Ticket #{int(r.Ticket)} - {r.Client} - {fcfa(r.Total)}":int(r.Ticket) for _,r in sales.iterrows()}; label=st.selectbox("Vente",list(labels)); sale_id=labels[label]; details=db.sale_details(sale_id)
@@ -123,7 +126,7 @@ def returns_page(user):
     if items.empty: return
     imap={f"{r.Produit} - vendu {int(r.Quantite)}":r for _,r in items.iterrows()}
     with st.form("advanced_return"):
-        ilabel=st.selectbox("Produit retourné",list(imap)); item=imap[ilabel]; qty=st.number_input("Quantité",min_value=1,max_value=int(item.Quantite),step=1); reason=st.text_input("Motif du retour"); resolution=st.selectbox("Solution",["REMBOURSEMENT","AVOIR","ECHANGE"],format_func=lambda x:{"REMBOURSEMENT":"Remboursement","AVOIR":"Avoir client","ECHANGE":"Échange"}[x]); method=st.selectbox("Mode de remboursement",["Especes","Wave","Orange Money","Carte"])
+        ilabel=st.selectbox("Produit retourné",list(imap)); item=imap[ilabel]; qty=st.number_input("Quantité",min_value=1,max_value=int(item.Quantite),step=1); reason=st.text_input("Motif du retour"); resolution=st.selectbox("Solution",["REMBOURSEMENT","AVOIR","ECHANGE"],format_func=lambda x:{"REMBOURSEMENT":"Remboursement","AVOIR":"Avoir client","ECHANGE":"Échange : remboursement puis nouvelle vente"}[x]); method=st.selectbox("Mode de remboursement",["Especes","Wave","Orange Money","Carte"])
         approval_pin=st.text_input("PIN administrateur requis",type="password",max_chars=4) if user.get("role")=="seller" else ""
         if st.form_submit_button("Valider le retour",type="primary"):
             approved=True
@@ -134,7 +137,13 @@ def returns_page(user):
                 except Exception: approved=False
             if not approved: st.error("PIN administrateur incorrect.")
             else:
-                refund=v3.process_return(sale_id,int(item.product_id),int(qty),reason,resolution,method,int(user["id"])); db.log_action(int(user["id"]),"RETOUR_AVANCE",f"Ticket #{sale_id} - {resolution} - {refund}"); st.success(f"Retour enregistré. Montant : {fcfa(refund)}"); st.rerun()
+                try:
+                    refund=v3.process_return(sale_id,int(item.product_id),int(qty),reason,resolution,method,int(user["id"]))
+                    db.log_action(int(user["id"]),"RETOUR_AVANCE",f"Ticket #{sale_id} - {resolution} - {refund}")
+                    st.session_state["return_notice"]=f"Retour enregistré. Montant à rembourser / avoir : {fcfa(refund)}." + (" Enregistrez maintenant le produit de remplacement dans Nouvelle vente." if resolution=="ECHANGE" else "")
+                    st.rerun()
+                except ValueError as error:
+                    st.error(str(error))
     st.subheader("Historique"); st.dataframe(v3.returns_history(),hide_index=True,width="stretch")
 
 

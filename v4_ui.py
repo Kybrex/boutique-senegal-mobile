@@ -39,8 +39,12 @@ def impression_page(user):
         else:
             categories=["Toutes"]+sorted(str(x) for x in products.Categorie.dropna().unique() if str(x))
             category=st.selectbox("Catégorie",categories,key="label_category"); selected=products if category=="Toutes" else products[products.Categorie.astype(str)==category]
-            st.caption(f"{len(selected)} étiquette(s), 24 par page A4.")
-            st.download_button("Imprimer les étiquettes code-barres",make_barcode_labels_pdf(selected,settings),file_name=f"etiquettes_{date.today()}.pdf",mime="application/pdf",icon=":material/barcode:",width="stretch")
+            printable = selected[selected.Code_barres.fillna("").astype(str).str.strip().ne("")]
+            if len(printable) < len(selected):
+                st.info("Les produits sans code-barres sont exclus. Renseignez leur code dans Produits et quantités avant d’imprimer leurs étiquettes.")
+            st.caption(f"{len(printable)} étiquette(s), 24 par page A4.")
+            if not printable.empty:
+                st.download_button("Imprimer les étiquettes code-barres",make_barcode_labels_pdf(printable,settings),file_name=f"etiquettes_{date.today()}.pdf",mime="application/pdf",icon=":material/barcode:",width="stretch")
     with client_tab:
         if clients.empty: st.info("Aucun client.")
         else:

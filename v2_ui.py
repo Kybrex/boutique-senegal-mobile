@@ -137,6 +137,9 @@ def inventory_page(user: dict) -> None:
         counted = st.number_input("Quantité réellement comptée", min_value=0, value=int(row.Stock), step=1)
         notes = st.text_input("Observation")
         if st.form_submit_button("Valider et corriger le stock", type="primary"):
+            if int(counted) != int(row.Stock) and not notes.strip():
+                st.error("Indiquez le motif de l’écart avant de corriger le stock.")
+                return
             db.save_inventory_count(int(row.id), int(counted), int(user["id"]), notes)
             db.log_action(int(user["id"]), "INVENTAIRE", f"{row.Produit}: {row.Stock} → {counted}")
             st.success("Inventaire enregistré et stock corrigé."); st.rerun()

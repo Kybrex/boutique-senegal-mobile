@@ -186,6 +186,10 @@ def delete_sale(sale_id):
 
 
 def return_sale_item(sale_id, product_id, quantity):
+    before = sale_details(sale_id)
+    if before is None: raise ValueError("Vente introuvable.")
+    old_sale, old_items = before
+    before_gross = float(old_items.Total.sum()) if not old_items.empty else 0.0
     item = _one("sale_items", sale_id=sale_id, product_id=product_id)
     if item is None or int(quantity) <= 0 or int(quantity) > int(item["quantity"]):
         raise ValueError("Quantité retournée invalide.")
@@ -200,10 +204,11 @@ def return_sale_item(sale_id, product_id, quantity):
         raise ValueError("Vente introuvable.")
     sale, items = details
     gross = float(items.Total.sum()) if not items.empty else 0.0
-    discount = min(float(sale.get("discount") or 0), gross)
-    total = gross - discount
+    discount = round(float(old_sale.get("discount") or 0)*gross/before_gross,2) if before_gross else 0.0
+    total = round(gross - discount,2)
     paid = min(float(sale.get("paid") or 0), total)
-    _table("sales").update({"total": total, "discount": discount, "paid": paid}).eq("id", sale_id).execute()
+    commission=float(old_sale.get("commission_amount") or 0)*total/float(old_sale["total"]) if float(old_sale["total"]) else 0
+    _table("sales").update({"total": total, "discount": discount, "paid": paid, "commission_amount":commission}).eq("id", sale_id).execute()
     return total
 
 

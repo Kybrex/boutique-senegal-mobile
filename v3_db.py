@@ -135,12 +135,22 @@ def process_return(sale_id,product_id,quantity,reason,resolution,refund_method,u
     details=db.sale_details(sale_id)
     if details is None: raise ValueError("Vente introuvable.")
     sale,items=details; match=items[items.product_id==product_id]
+    if resolution not in {"REMBOURSEMENT","AVOIR","ECHANGE"} or refund_method not in {"Especes","Wave","Orange Money","Carte"}:
+        raise ValueError("Solution ou mode de remboursement invalide.")
+    if not reason.strip(): raise ValueError("Indiquez le motif du retour.")
+    if resolution=="AVOIR" and not sale.get("client_id"):
+        raise ValueError("Un avoir nécessite un client enregistré.")
+    import business_features as features
+    stored_sale=next(r for r in features.records("sales") if r["id"]==sale_id)
+    raw=[r for r in features.records("sale_items") if r["sale_id"]==sale_id and r["product_id"]==product_id]
+    if len(raw)!=1 or raw[0].get("variant_id") is not None or int(stored_sale.get("store_id") or 1)!=1:
+        raise ValueError("Ce retour nécessite un traitement spécifique : variante, plusieurs lignes ou autre boutique.")
     if match.empty or quantity<=0 or quantity>int(match.iloc[0].Quantite): raise ValueError("Quantité retournée invalide.")
     gross=float(items.Total.sum()) if not items.empty else 0.0; ratio=(float(sale.get("total") or 0)/gross) if gross>0 else 1.0
     amount=float(match.iloc[0].Prix)*int(quantity)*ratio; client_id=sale.get("client_id")
-    db.return_sale_item(sale_id,product_id,quantity)
-    refund=amount if resolution in {"REMBOURSEMENT","AVOIR"} else 0
-    payload={"sale_id":sale_id,"product_id":product_id,"quantity":quantity,"reason":reason.strip(),"resolution":resolution,"refund_method":refund_method if resolution=="REMBOURSEMENT" else "","refund_amount":refund,"processed_by":user_id}
+    new_total=db.return_sale_item(sale_id,product_id,quantity)
+    refund=round(max(0,min(float(sale.get("paid") or 0),float(sale["total"]))-new_total),2)
+    payload={"sale_id":sale_id,"product_id":product_id,"quantity":quantity,"reason":reason.strip(),"resolution":resolution,"refund_method":refund_method if resolution in {"REMBOURSEMENT","ECHANGE"} else "","refund_amount":refund,"processed_by":user_id}
     if _cloud():
         cloud._table("returns").insert(payload).execute()
         if resolution=="AVOIR" and client_id:
@@ -150,7 +160,7 @@ def process_return(sale_id,product_id,quantity,reason,resolution,refund_method,u
             conn.execute("INSERT INTO returns(sale_id,product_id,quantity,reason,resolution,refund_method,refund_amount,processed_by) VALUES(?,?,?,?,?,?,?,?)",(sale_id,product_id,quantity,payload["reason"],resolution,payload["refund_method"],refund,user_id))
             if resolution=="AVOIR" and client_id: conn.execute("UPDATE clients SET store_credit=store_credit+? WHERE id=?",(refund,client_id))
             conn.commit()
-    if resolution=="REMBOURSEMENT": add_cash_movement(date.today(),"SORTIE",refund,f"Remboursement ticket #{sale_id}",user_id)
+    # The cash journal reads this return directly; never add a duplicate cash movement.
     return refund
 
 

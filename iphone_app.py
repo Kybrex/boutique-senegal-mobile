@@ -11,6 +11,7 @@ from branding import LOGO_PATH
 
 from receipt import make_receipt, make_receipt_pdf
 import v2_ui
+import daily_operations_ui as daily_ui
 
 
 st.set_page_config(page_title="Boutique Sénégal", page_icon=":material/storefront:", layout="centered")
@@ -140,11 +141,11 @@ if is_admin and v4.v4_ready() and not st.session_state.get("v4_session_tasks_don
 # Seven everyday sections. Existing internal routes remain compatible with documents.
 sections = {
     "Tableau de bord": [("Accueil", "Vue d'ensemble"), ("Rapports", "Rapports et dépenses"), ("Bénéfice", "Bénéfice")],
-    "Ventes": [("Caisse", "Nouvelle vente"), ("Historique", "Historique"), ("Retours V3", "Retours")],
+    "Ventes": [("Caisse", "Nouvelle vente"), ("Historique", "Historique"), ("Retours V3", "Retours et échanges"), ("Clôture", "Caisse journalière"), ("Paiements", "Paiements par mode")],
     "Achats": [("Achats", "Achat reçu"), ("Commandes", "Commandes et règlements"), ("Justificatifs", "Justificatifs")],
-    "Stock": [("Produits", "Produits et quantités"), ("Inventaire", "Inventaire"), ("Réapprovisionnement", "À commander")],
+    "Stock": [("Produits", "Produits et quantités"), ("Inventaire", "Inventaire"), ("Réapprovisionnement", "À commander"), ("Impression", "Codes-barres et impressions")],
     "Fournisseurs": [("Fournisseurs", "Fournisseurs"), ("Dettes fournisseurs", "Sommes à payer")],
-    "Clients": [("Clients", "Liste des clients"), ("Fiche client", "Fiche complète"), ("Crédits", "Historique et crédits"), ("Dettes clients", "Impayés et échéances")],
+    "Clients": [("Clients", "Liste des clients"), ("Fiche client", "Fiche complète"), ("Crédits", "Historique et crédits"), ("Dettes clients", "Impayés et échéances"), ("Relances", "Relances WhatsApp")],
     "Facturation": [("Factures", "Factures des ventes"), ("Archives factures", "Factures émises"), ("Documents", "Devis et autres documents")],
 }
 if not is_admin:
@@ -324,7 +325,11 @@ elif page == "Caisse":
             client_name = st.selectbox("Client", list(client_map))
             payment_methods = ["Especes", "Wave", "Orange Money", "Carte"] + (["Credit"] if permissions["credit"] else [])
             method = st.selectbox("Paiement", payment_methods)
-            paid = st.number_input("Montant reçu", min_value=0.0, value=total, step=100.0)
+            if method == "Credit":
+                paid = 0.0
+                st.caption("Vente entièrement à crédit. Pour un acompte, choisissez son mode de paiement et saisissez le montant reçu.")
+            else:
+                paid = st.number_input("Montant reçu", min_value=0.0, value=total, step=100.0)
             is_credit = method == "Credit" or paid < total
             credit_days = st.number_input("Durée du crédit (jours)", min_value=1, value=30, step=1) if is_credit else 0
             due_date = date.today() + timedelta(days=int(credit_days)) if is_credit else None
@@ -347,8 +352,8 @@ elif page == "Caisse":
                     elif pin_required and not v4.verify_admin_pin(approval_pin,int(user["id"]),"REMISE_IMPORTANTE",discount,f"Remise {discount_percent:.1f}%"):
                         st.error("PIN administrateur incorrect.")
                     else:
-                        if v4.v4_ready(): ticket, saved_gross, saved_total = v4.atomic_save_sale(st.session_state.mobile_cart, seller_id, client_map[client_name], paid, method, discount, due_date, seller_store_id)
-                        else: ticket, saved_gross, saved_total = db.save_sale(st.session_state.mobile_cart, seller_id, client_map[client_name], paid, method, discount, due_date)
+                        if v4.v4_ready(): ticket, saved_gross, saved_total = v4.atomic_save_sale(st.session_state.mobile_cart, seller_id, client_map[client_name], min(paid,total), method, discount, due_date, seller_store_id)
+                        else: ticket, saved_gross, saved_total = db.save_sale(st.session_state.mobile_cart, seller_id, client_map[client_name], min(paid,total), method, discount, due_date)
                         settings = db.get_settings() if db.v2_ready() else {}
                         receipt_args = (ticket, st.session_state.mobile_cart, seller_name, client_name, saved_gross, discount, saved_total, paid, method, settings)
                         st.session_state.mobile_receipt = make_receipt(*receipt_args)
@@ -361,7 +366,7 @@ elif page == "Caisse":
                             if db.v2_ready(): db.log_action(int(user["id"]), "VENTE", f"Ticket #{ticket} - {saved_total} FCFA")
                         except Exception: pass
                         st.session_state.mobile_cart = []
-                        st.success(f"Vente enregistrée. Monnaie : {fcfa(paid-saved_total)}")
+                        st.success(f"Vente enregistrée. Monnaie : {fcfa(max(0,paid-saved_total))}")
                 if st.button("Vider", icon=":material/delete:"):
                     st.session_state.mobile_cart = []
                     st.rerun()
@@ -495,7 +500,9 @@ elif page == "Crédits":
         else:
             st.warning(f"{len(alerts)} crédit(s) nécessitent votre attention.", icon=":material/notifications_active:")
             st.dataframe(alerts, hide_index=True, column_config={"Reste": st.column_config.NumberColumn(format="%.0f FCFA")}, width="stretch")
-            reminder_labels={f"{r.Client} - ticket #{int(r.Ticket)} - {r.Statut}":r for _,r in alerts.iterrows()}; reminder_label=st.selectbox("Rappel WhatsApp",list(reminder_labels)); st.link_button("Envoyer le rappel WhatsApp",v3_ui.credit_reminder_link(reminder_labels[reminder_label]),icon=":material/send:",width="stretch")
+            if st.button("Préparer une relance WhatsApp"):
+                st.session_state.mobile_page = "Relances"
+                st.rerun()
     customers = db.clients()
     if customers.empty:
         st.info("Ajoutez d'abord un client dans la liste des clients.")
@@ -613,16 +620,9 @@ elif page in ("Rapports", "Historique"):
                     except ValueError as error:
                         st.error(str(error))
             if not sale_items.empty:
-                st.subheader("Retour partiel")
-                return_map = {f"{row.Produit} — vendu: {int(row.Quantite)}": row for _, row in sale_items.iterrows()}
-                return_label = st.selectbox("Produit retourné", list(return_map), key=f"return_product_{sale_id}")
-                return_row = return_map[return_label]
-                return_quantity = st.number_input("Quantité retournée", min_value=1, max_value=int(return_row.Quantite), value=1, step=1, key=f"return_qty_{sale_id}")
-                if st.button("Valider le retour", key=f"return_sale_{sale_id}"):
-                    try:
-                        new_total = db.return_sale_item(sale_id, int(return_row.product_id), int(return_quantity))
-                        st.success(f"Retour enregistré, stock restauré. Nouveau total : {fcfa(new_total)}"); st.rerun()
-                    except ValueError as error: st.error(str(error))
+                if st.button("Traiter un retour ou un échange"):
+                    st.session_state.mobile_page = "Retours V3"
+                    st.rerun()
             st.warning("Supprimer une vente est définitif. Les quantités vendues seront remises en stock.", icon=":material/warning:")
             confirm_delete = st.checkbox("Je confirme la suppression de cette vente", key=f"confirm_delete_sale_{sale_id}")
             if st.button("Supprimer définitivement", icon=":material/delete:", key=f"delete_sale_{sale_id}"):
@@ -641,7 +641,13 @@ elif page == "Tableau V2":
     v2_ui.dashboard_page()
 
 elif page == "Clôture":
-    v2_ui.cash_page(user)
+    daily_ui.cash_page(user)
+
+elif page == "Paiements":
+    daily_ui.payments_page(user)
+
+elif page == "Relances":
+    daily_ui.reminders_page(user)
 
 elif page == "Inventaire":
     v2_ui.inventory_page(user)

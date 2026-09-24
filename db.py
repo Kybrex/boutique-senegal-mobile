@@ -167,6 +167,8 @@ def delete_sale(sale_id: int) -> None:
         conn.commit()
 def return_sale_item(sale_id: int, product_id: int, quantity: int) -> float:
     with connection() as conn:
+        sale_before = conn.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone()
+        before_gross = float(conn.execute("SELECT COALESCE(SUM(quantity*unit_price),0) FROM sale_items WHERE sale_id=?", (sale_id,)).fetchone()[0])
         item = conn.execute("SELECT id,quantity FROM sale_items WHERE sale_id=? AND product_id=?", (sale_id, product_id)).fetchone()
         if item is None or quantity <= 0 or quantity > item["quantity"]: raise ValueError("Quantité retournée invalide.")
         remaining = item["quantity"] - quantity
@@ -177,8 +179,10 @@ def return_sale_item(sale_id: int, product_id: int, quantity: int) -> float:
         conn.execute("INSERT INTO store_stock(store_id,product_id,stock) VALUES(1,?,?) ON CONFLICT(store_id,product_id) DO UPDATE SET stock=excluded.stock", (product_id,current))
         gross = float(conn.execute("SELECT COALESCE(SUM(quantity*unit_price),0) AS gross FROM sale_items WHERE sale_id=?", (sale_id,)).fetchone()["gross"])
         sale = conn.execute("SELECT discount,paid FROM sales WHERE id=?", (sale_id,)).fetchone()
-        discount = min(float(sale["discount"]), gross); total = gross-discount; paid = min(float(sale["paid"]), total)
-        conn.execute("UPDATE sales SET total=?,discount=?,paid=? WHERE id=?", (total, discount, paid, sale_id)); conn.commit()
+        discount = round(float(sale_before["discount"])*gross/before_gross,2) if before_gross else 0.0
+        total = round(gross-discount,2); paid = min(float(sale["paid"]), total)
+        commission = float(sale_before["commission_amount"] or 0)*total/float(sale_before["total"]) if float(sale_before["total"]) else 0
+        conn.execute("UPDATE sales SET total=?,discount=?,paid=?,commission_amount=? WHERE id=?", (total, discount, paid,commission, sale_id)); conn.commit()
         return total
 def add_expense(label: str, amount: float) -> None: execute("INSERT INTO expenses(label,amount) VALUES(?,?)", (label.strip(), amount))
 def register_purchase(product_id: int, quantity: int, unit_cost: float, supplier_name: str = "") -> None:
