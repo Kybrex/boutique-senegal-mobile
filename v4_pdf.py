@@ -22,12 +22,13 @@ def make_barcode_labels_pdf(products: pd.DataFrame, settings: dict | None = None
     from reportlab.lib.units import mm
     from reportlab.platypus import Flowable, SimpleDocTemplate, Table, TableStyle
 
+    products=products[products.Code_barres.fillna("").astype(str).str.strip().ne("")]
     settings=settings or {}; output=BytesIO()
     doc=SimpleDocTemplate(output,pagesize=A4,leftMargin=7*mm,rightMargin=7*mm,topMargin=8*mm,bottomMargin=8*mm,title="Étiquettes produits")
     class Label(Flowable):
         def __init__(self,row): super().__init__(); self.row=row; self.width=63*mm; self.height=32*mm
         def draw(self):
-            name=str(self.row.get("Produit", ""))[:35]; barcode=str(self.row.get("Code_barres", "") or self.row.get("id", "")); price=_money(self.row.get("Vente",0))
+            name=str(self.row.get("Produit", ""))[:35]; barcode=str(self.row["Code_barres"]).strip(); price=_money(self.row.get("Vente",0))
             c=self.canv; c.setStrokeColor(colors.HexColor("#BBBBBB")); c.rect(0,0,self.width,self.height)
             c.setFont("Helvetica-Bold",8); c.drawCentredString(self.width/2,self.height-7*mm,name)
             if barcode:
