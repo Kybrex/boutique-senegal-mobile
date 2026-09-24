@@ -270,6 +270,7 @@ def save_inventory_count(product_id: int, counted: int, user_id: int, notes: str
         row = conn.execute("SELECT stock FROM products WHERE id=?", (product_id,)).fetchone()
         if row is None: raise ValueError("Produit introuvable.")
         expected = int(row["stock"]); difference = counted-expected
+        if difference and not notes.strip(): raise ValueError("Indiquez le motif de l'écart de stock.")
         conn.execute("UPDATE products SET stock=? WHERE id=?", (counted,product_id))
         conn.execute("INSERT INTO store_stock(store_id,product_id,stock) VALUES(1,?,?) ON CONFLICT(store_id,product_id) DO UPDATE SET stock=excluded.stock", (product_id,counted))
         conn.execute("INSERT INTO inventory_counts(product_id,expected_stock,counted_stock,difference,counted_by,notes) VALUES(?,?,?,?,?,?)", (product_id,expected,counted,difference,user_id,notes.strip())); conn.commit()

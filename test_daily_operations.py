@@ -5,8 +5,9 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from types import SimpleNamespace
 import gc
-import db, v3_db as v3, business_features as f, daily_operations as ops
+import db, v3_db as v3, v4_db as v4, business_features as f, daily_operations as ops
 import cloud_db as cloud
+from v4_pdf import make_barcode_labels_pdf
 
 def rejects(action):
     try: action()
@@ -22,6 +23,24 @@ def run():
         db.create_seller_with_user('Seller','','','seller','test-password')
         db.add_client('Awa','771234567','','')
         db.add_product('Riz','Epicerie',500,1000,100,5,None)
+        rejects(lambda:db.save_inventory_count(1,98,int(user['id']),'  '))
+        assert int(db.products().iloc[0].Stock)==100
+        assert db.inventory_history().empty
+        db.save_inventory_count(1,100,int(user['id']))
+        db.save_inventory_count(1,98,int(user['id']),'Casse constatée')
+        assert int(db.products().iloc[0].Stock)==98
+        db.save_inventory_count(1,100,int(user['id']),'Correction du comptage')
+        with patch.object(cloud,'_one',return_value={'stock':100}),patch.object(cloud,'set_stock') as set_stock,patch.object(cloud,'_table') as table:
+            rejects(lambda:cloud.save_inventory_count(1,98,int(user['id']),' '))
+            set_stock.assert_not_called(); table.assert_not_called()
+        import pandas as pd
+        from reportlab.graphics.barcode import code128
+        labels=pd.DataFrame([{'id':1,'Produit':'Sans code','Code_barres':'','Vente':1000},
+                             {'id':2,'Produit':'Avec code','Code_barres':'SN-002','Vente':2000}])
+        original_code128=code128.Code128
+        with patch.object(code128,'Code128',wraps=original_code128) as symbol:
+            assert make_barcode_labels_pdf(labels).startswith(b'%PDF')
+            assert [call.args[0] for call in symbol.call_args_list]==['SN-002']
         today=date.today()
         yesterday=today-timedelta(days=1)
         cart=[{'id':1,'quantity':2,'sale_price':1000}]
@@ -78,8 +97,20 @@ def run():
         v3.add_supplier_payment(po,500,'Wave',int(user['id']))
         after=ops.totals(ops.journal(today,today)).set_index('Paiement')
         assert after.loc['Wave','Sortie']==1500
+        # Two successive returns must retain the same total discount and commission ratio.
+        db.execute('UPDATE sellers SET commission_rate=10 WHERE id=1')
+        repeat=v4.atomic_save_sale([{'id':1,'quantity':3,'sale_price':1000}],1,1,2700,'Carte',300)[0]
+        assert v3.process_return(repeat,1,1,'Premier retour','REMBOURSEMENT','Carte',int(user['id']))==900
+        sale,_=db.sale_details(repeat)
+        assert sale['total']==1800 and sale['discount']==200
+        assert db.query('SELECT commission_amount FROM sales WHERE id=?',(repeat,)).iloc[0,0]==180
+        assert v3.process_return(repeat,1,1,'Second retour','REMBOURSEMENT','Carte',int(user['id']))==900
+        sale,_=db.sale_details(repeat)
+        assert sale['total']==900 and sale['discount']==100
+        assert db.query('SELECT commission_amount FROM sales WHERE id=?',(repeat,)).iloc[0,0]==90
+        card=ops.totals(ops.journal(today,today)).set_index('Paiement').loc['Carte']
+        assert card['Sortie']==1800
         # Cloud return computes exactly the same retained discount and paid amount.
-        import pandas as pd
         calls=[]
         class Table:
             def update(self, values): calls.append(values); return self
