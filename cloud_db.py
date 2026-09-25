@@ -335,9 +335,7 @@ def inventory_snapshot():
 def save_inventory_count(product_id, counted, user_id, notes=""):
     product=_one("products",id=product_id)
     if product is None or counted < 0: raise ValueError("Comptage invalide.")
-    expected=int(product["stock"])
-    if counted != expected and not notes.strip(): raise ValueError("Indiquez le motif de l'écart de stock.")
-    set_stock(product_id,counted)
+    expected=int(product["stock"]); set_stock(product_id,counted)
     _table("inventory_counts").insert({"product_id":product_id,"expected_stock":expected,"counted_stock":counted,"difference":counted-expected,"counted_by":user_id,"notes":notes.strip()}).execute()
 def inventory_history():
     rows=_data(_table("inventory_counts").select("*,products(name)").order("created_at",desc=True).limit(200).execute())
