@@ -24,6 +24,10 @@ def run():
     app.button[0].click().run()
     check(app)
     assert len(app.get('download_button')) == 1
+    # Activity notifications rerun the whole app after the prepare click.
+    app.run()
+    check(app)
+    assert len(app.get('download_button')) == 1, 'PDF download disappeared after a rerun'
     app.text_input[0].set_value('invalid').run()
     check(app)
     assert app.error and not app.button

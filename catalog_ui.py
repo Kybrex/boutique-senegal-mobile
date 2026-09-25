@@ -1,5 +1,8 @@
 """Configure and download a customer catalogue without changing sale prices."""
 from datetime import date, timedelta
+import hashlib
+import json
+import logging
 import pandas as pd
 import streamlit as st
 from catalog_options import prepare_catalog, whatsapp_number, reference
@@ -40,7 +43,26 @@ def catalog_panel(products, settings):
         return
     if not phone.strip():
         st.info('Renseignez le numéro WhatsApp pour ajouter le lien de commande et le QR code.')
+    signature = hashlib.sha256((selected_products.to_json() + json.dumps(
+        {'settings': settings, 'options': options}, sort_keys=True, default=str)).encode()).hexdigest()
+    # Keep the request and result through activity-triggered reruns. Changing the
+    # selection or prices must never offer a stale catalogue for download.
     if st.button('Préparer le catalogue PDF', key='catalog_build', icon=':material/menu_book:'):
-        with st.spinner('Préparation du catalogue et des photos…'):
-            data = make_catalog_pdf(selected_products, settings, options)
-        st.download_button('Imprimer le catalogue clients', data, file_name=f'catalogue_{date.today()}.pdf', mime='application/pdf', width='stretch', on_click='ignore')
+        st.session_state['catalog_request'] = signature
+        st.session_state.pop('catalog_result', None)
+    result = st.session_state.get('catalog_result')
+    if st.session_state.get('catalog_request') == signature and (not result or result['signature'] != signature):
+        try:
+            with st.spinner('Préparation du catalogue et des photos…'):
+                data = make_catalog_pdf(selected_products, settings, options)
+            result = {'signature': signature, 'data': data, 'filename': f'catalogue_{date.today()}.pdf'}
+            st.session_state['catalog_result'] = result
+            st.session_state.pop('catalog_request', None)
+        except Exception:
+            logging.getLogger(__name__).exception('Catalogue PDF generation failed')
+            st.session_state.pop('catalog_request', None)
+            st.error('Le catalogue n’a pas pu être préparé. Réessayez avec moins de produits ou contactez-nous si le problème persiste.')
+            return
+    if result and result['signature'] == signature:
+        st.success('Le catalogue PDF est prêt. Cliquez ci-dessous pour le télécharger.')
+        st.download_button('Télécharger le catalogue PDF', result['data'], file_name=result['filename'], mime='application/pdf', width='stretch', on_click='ignore', key='catalog_download')
