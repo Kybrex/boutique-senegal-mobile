@@ -100,6 +100,12 @@ def authenticate(username: str, password: str) -> dict | None:
     return users.drop(columns="password_hash").iloc[0].to_dict()
 def add_product(name: str, category: str, purchase: float, sale: float, stock: int, minimum: int, supplier_id: int | None) -> None:
     execute("INSERT INTO products(name,category,purchase_price,sale_price,stock,min_stock,supplier_id) VALUES(?,?,?,?,?,?,?)", (name.strip(), category.strip(), purchase, sale, stock, minimum, supplier_id))
+def update_product_prices(product_id: int, purchase: float, sale: float) -> None:
+    if purchase < 0 or sale <= 0: raise ValueError("Prix invalides.")
+    with connection() as conn:
+        if not conn.execute("SELECT 1 FROM products WHERE id=?", (product_id,)).fetchone(): raise ValueError("Produit introuvable.")
+        conn.execute("UPDATE products SET purchase_price=?,sale_price=? WHERE id=?", (purchase, sale, product_id))
+        conn.commit()
 def set_stock(product_id: int, stock: int) -> None:
     with connection() as conn:
         conn.execute("UPDATE products SET stock=? WHERE id=?", (stock, product_id))
@@ -345,7 +351,7 @@ try:
             if record is None or not valid_password(password, record["password_hash"]): return None
             record.pop("password_hash", None); return record
         def add_product(name, category, purchase, sale, stock, minimum, supplier_id): _cloud.add_product(name.strip(), category.strip(), purchase, sale, stock, minimum, supplier_id)
-        set_stock = _cloud.set_stock; adjust_stock = _cloud.adjust_stock
+        set_stock = _cloud.set_stock; adjust_stock = _cloud.adjust_stock; update_product_prices = _cloud.update_product_prices
         def add_seller(name, phone, email): _cloud.add_seller(name.strip(), phone.strip(), email.strip().lower())
         def create_seller_with_user(name, phone, email, username, password): _cloud.create_seller_with_user(name.strip(), phone.strip(), email.strip().lower(), username.strip().lower(), password_hash(password))
         def add_supplier(name, contact, phone, email, address): _cloud.add_supplier(name.strip(), contact.strip(), phone.strip(), email.strip().lower(), address.strip())

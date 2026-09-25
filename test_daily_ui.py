@@ -21,6 +21,19 @@ def run():
         next(w for w in at.text_input if w.label=="Nom d'utilisateur").set_value('admin')
         next(w for w in at.text_input if w.label=='Mot de passe').set_value('test-password')
         button(at,'Se connecter').click().run(); check(at)
+        button(at,'Stock').click().run(); check(at)
+        next(w for w in at.radio if w.label=='Afficher').set_value('Inventaire').run(); check(at)
+        assert at.session_state['mobile_page']=='Inventaire'
+        assert any(h.value=='Inventaire physique' for h in at.header)
+        next(w for w in at.radio if w.label=='Afficher').set_value('Produits').run(); check(at)
+        assert any(h.value=='Produits et stock' for h in at.header)
+        next(w for w in at.number_input if w.label=='Quantité').set_value(17)
+        button(at,'Enregistrer le stock').click().run(); check(at)
+        assert any('18 → 17' in s for s in db.audit_logs().Details)
+        next(w for w in at.number_input if w.label=="Nouveau prix de vente (FCFA)").set_value(1200)
+        button(at,'Enregistrer les prix').click().run(); check(at)
+        assert float(db.products().iloc[0].Vente)==1200
+        assert any('1000.0 → 1200.0' in s for s in db.audit_logs().Details)
         for route,title in [('Clôture','Caisse journalière'),('Paiements','Encaissements et décaissements'),('Relances','Relances clients'),('Retours V3','Retours, échanges et remboursements'),('Inventaire','Inventaire physique'),('Réapprovisionnement','Alertes et réapprovisionnement'),('Bénéfice','Bénéfice de la boutique'),('Impression',"Centre d'impression")]:
             at.session_state['mobile_page']=route; at.run(); check(at)
             assert any(h.value==title for h in at.header),(route,[h.value for h in at.header])

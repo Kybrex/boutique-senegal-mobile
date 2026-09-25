@@ -189,12 +189,13 @@ routes = settings_pages if active_section == "Réglages" else sections[active_se
 if len(routes) > 1:
     route_labels = dict(routes)
     route_names = list(route_labels)
-    selected = st.radio("Afficher", route_names, index=route_names.index(current),
-                        format_func=route_labels.get, horizontal=True,
-                        key=f"simple_view_{active_section}_{current}", label_visibility="collapsed")
-    if selected != current:
-        st.session_state.mobile_page = selected
-        st.rerun()
+    view_key = f"simple_view_{active_section}"
+    if st.session_state.get(view_key) != current:
+        st.session_state[view_key] = current
+    def select_view():
+        st.session_state.mobile_page = st.session_state[view_key]
+    st.radio("Afficher", route_names, format_func=route_labels.get, horizontal=True,
+             key=view_key, on_change=select_view, label_visibility="collapsed")
 page = st.session_state.mobile_page
 
 if page == "Bénéfice":
@@ -416,10 +417,27 @@ elif page == "Produits":
                 try:
                     if mode == "Définir": db.set_stock(int(record.id), int(amount))
                     else: db.adjust_stock(int(record.id), int(amount) if mode == "Ajouter" else -int(amount))
+                    new_stock = int(amount) if mode == "Définir" else int(record.Stock) + (int(amount) if mode == "Ajouter" else -int(amount))
+                    db.log_action(int(user["id"]), "STOCK_MODIFIE", f"{record.Produit} (#{int(record.id)}): {int(record.Stock)} → {new_stock} ({mode})")
                     st.success("Stock mis à jour.")
                     st.rerun()
                 except ValueError as error:
                     st.error(str(error))
+        with st.expander("Modifier les prix"):
+            price_name = st.selectbox("Produit à repricer", inventory.Produit.tolist())
+            price_row = inventory.loc[inventory.Produit == price_name].iloc[0]
+            with st.form("edit_product_prices"):
+                new_purchase = st.number_input("Nouveau prix d'achat (FCFA)", min_value=0.0, value=float(price_row.Achat), step=100.0, key=f"purchase_{int(price_row.id)}")
+                new_sale = st.number_input("Nouveau prix de vente (FCFA)", min_value=0.01, value=max(0.01,float(price_row.Vente)), step=100.0, key=f"sale_{int(price_row.id)}")
+                if st.form_submit_button("Enregistrer les prix"):
+                    try:
+                        db.update_product_prices(int(price_row.id), new_purchase, new_sale)
+                        db.log_action(int(user["id"]), "PRIX_MODIFIES", f"{price_name} (#{int(price_row.id)}): achat {price_row.Achat} → {new_purchase}; vente {price_row.Vente} → {new_sale}")
+                        st.success("Prix enregistrés."); st.rerun()
+                    except ValueError as error: st.error(str(error))
+        with st.expander("Historique des modifications de stock et de prix"):
+            history = db.audit_logs()
+            st.dataframe(history[history.Action.isin(["STOCK_MODIFIE", "PRIX_MODIFIES", "INVENTAIRE"])], hide_index=True, width="stretch")
         if db.v2_ready():
             with st.expander("Code-barres et photo du produit", icon=":material/add_a_photo:"):
                 detail_name = st.selectbox("Produit à identifier", inventory.Produit.tolist(), key="detail_product")
