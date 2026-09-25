@@ -38,11 +38,10 @@ def _lock():
 _activity_component = st.components.v2.component(
     'boutique_idle_guard', js=Path(__file__).with_name('idle_guard.js').read_text(encoding='utf-8'))
 
-@st.fragment(run_every='10s')
 def watch():
     if 'mobile_user' not in st.session_state or expired(st.session_state):
         clear_session(notice=True)
-        st.rerun(scope='app')
+        st.rerun()
     remaining = max(0, st.session_state['_auth_timeout']-(time.monotonic()-st.session_state['_auth_seen']))
     _activity_component(key='idle_guard_'+st.session_state['_auth_nonce'],
         data={'nonce':st.session_state['_auth_nonce'],'remaining_ms':int(remaining*1000), 'timeout_ms':int(st.session_state['_auth_timeout']*1000)},

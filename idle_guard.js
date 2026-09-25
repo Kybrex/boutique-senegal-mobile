@@ -1,4 +1,5 @@
 const sessions = new Map();
+let activeOverlay = null;
 export default function ({ data, setTriggerValue }) {
   for (const key of sessions.keys()) if (key !== data.nonce) sessions.delete(key);
   if (!sessions.has(data.nonce)) sessions.set(data.nonce, {deadline:Date.now()+data.remaining_ms,lastSignal:0,pending:false,locked:false});
@@ -13,7 +14,9 @@ export default function ({ data, setTriggerValue }) {
     if (locked) return;
     locked = true;
     state.locked = true;
+    if (activeOverlay) activeOverlay.remove();
     overlay = document.createElement('div');
+    activeOverlay = overlay;
     overlay.setAttribute('role', 'alertdialog');
     overlay.setAttribute('aria-label', 'Session verrouillée');
     Object.assign(overlay.style, {position:'fixed',inset:'0',zIndex:'2147483647',
@@ -60,6 +63,9 @@ export default function ({ data, setTriggerValue }) {
     clearInterval(timer);
     events.forEach(name => document.removeEventListener(name, activity, true));
     document.removeEventListener('visibilitychange', check);
-    if (overlay) overlay.remove();
+    if (overlay && activeOverlay === overlay) {
+      overlay.remove();
+      activeOverlay = null;
+    }
   };
 }
