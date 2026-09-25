@@ -79,6 +79,10 @@ def add_client(name, phone, email, address): _table("clients").insert({"name": n
 def products() -> pd.DataFrame:
     rows = _data(_table("products").select("*,suppliers(name)").order("name").execute())
     return _frame([{ "id": r["id"], "Produit": r["name"], "Categorie": r.get("category", ""), "Achat": r["purchase_price"], "Vente": r["sale_price"], "Stock": r["stock"], "Minimum": r["min_stock"], "Fournisseur": (r.get("suppliers") or {}).get("name", ""), "Code_barres": r.get("barcode", "") or "", "Photo": r.get("photo_url", "") or "" } for r in rows], ["id", "Produit", "Categorie", "Achat", "Vente", "Stock", "Minimum", "Fournisseur", "Code_barres", "Photo"])
+def update_product_prices(product_id, purchase, sale):
+    if purchase < 0 or sale <= 0: raise ValueError("Prix invalides.")
+    if _one("products", id=product_id) is None: raise ValueError("Produit introuvable.")
+    _table("products").update({"purchase_price":float(purchase),"sale_price":float(sale)}).eq("id",product_id).execute()
 def sellers() -> pd.DataFrame:
     return _frame([{ "id": r["id"], "Vendeur": r["name"], "Telephone": r.get("phone", ""), "Email": r.get("email", "") } for r in _data(_table("sellers").select("*").eq("active", True).order("name").execute())], ["id", "Vendeur", "Telephone", "Email"])
 def suppliers() -> pd.DataFrame:
