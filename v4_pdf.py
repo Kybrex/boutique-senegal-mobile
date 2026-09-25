@@ -63,6 +63,44 @@ def make_statement_pdf(title: str, party: dict, rows: pd.DataFrame, settings: di
     story.append(table); build_document(doc, story, settings); return output.getvalue()
 
 
+def _catalog_photo(source):
+    """Decode stored uploads or public image URLs; a broken photo is optional."""
+    import base64
+    from urllib.request import urlopen
+    from PIL import Image, ImageOps
+
+    limit = 10 * 1024 * 1024
+    if not isinstance(source, str) or not source.strip():
+        return None
+    source = source.strip()
+    try:
+        if source.startswith('data:image/'):
+            header, encoded = source.split(',', 1)
+            if not header.endswith(';base64') or len(encoded) > limit * 4 // 3 + 4:
+                return None
+            data = base64.b64decode(encoded, validate=True)
+        elif source.startswith(('https://', 'http://')):
+            with urlopen(source, timeout=5) as response:
+                data = response.read(limit + 1)
+        else:
+            return None
+        if len(data) > limit:
+            return None
+        with Image.open(BytesIO(data)) as original:
+            if original.width * original.height > 25_000_000:
+                return None
+            photo = ImageOps.exif_transpose(original)
+            photo.thumbnail((800, 600))
+            photo = photo.convert('RGBA')
+            background = Image.new('RGB', photo.size, 'white')
+            background.paste(photo, mask=photo.getchannel('A'))
+            output = BytesIO()
+            background.save(output, format='JPEG', quality=85)
+            return output.getvalue()
+    except Exception:
+        return None
+
+
 def make_catalog_pdf(products: pd.DataFrame, settings: dict | None = None) -> bytes:
     """Catalogue prix public avec deux produits par ligne."""
     from reportlab.lib import colors
@@ -75,10 +113,40 @@ def make_catalog_pdf(products: pd.DataFrame, settings: dict | None = None) -> by
     settings=settings or {}; output=BytesIO(); styles=getSampleStyleSheet(); green=colors.HexColor("#12372A")
     doc=SimpleDocTemplate(output,pagesize=A4,leftMargin=12*mm,rightMargin=12*mm,topMargin=12*mm,bottomMargin=16*mm,title="Catalogue produits")
     story=logo_flowables() + [Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("shop",parent=styles["Title"],textColor=green,alignment=TA_CENTER)),Paragraph("CATALOGUE PRODUITS",ParagraphStyle("sub",parent=styles["Heading2"],alignment=TA_CENTER)),Spacer(1,6*mm)]
+    from reportlab.platypus import Flowable
+    from reportlab.lib.utils import ImageReader
+
+    class Photo(Flowable):
+        width = 80 * mm
+        height = 48 * mm
+
+        def __init__(self, data):
+            super().__init__()
+            self.width = 80 * mm
+            self.height = 48 * mm
+            self.data = data
+
+        def draw(self):
+            if self.data:
+                self.canv.drawImage(ImageReader(BytesIO(self.data)), 0, 0,
+                                    width=self.width, height=self.height,
+                                    preserveAspectRatio=True, anchor='c', mask='auto')
+            else:
+                self.canv.setFillColor(colors.HexColor('#EEF2EF'))
+                self.canv.rect(0, 0, self.width, self.height, fill=1, stroke=0)
+                self.canv.setFillColor(colors.HexColor('#68756C'))
+                self.canv.setFont('Helvetica', 9)
+                self.canv.drawCentredString(self.width / 2, self.height / 2, 'Photo indisponible')
+
     cards=[]
+    photos = {}
     for _,r in products.iterrows():
+        source = r.get('Photo', '')
+        source = source.strip() if isinstance(source, str) else ''
+        if source not in photos:
+            photos[source] = _catalog_photo(source)
         text=f"<b>{escape(str(r.get('Produit','')))}</b><br/>{escape(str(r.get('Categorie','') or ''))}<br/><font color='#12372A' size='13'><b>{_money(r.get('Vente',0))}</b></font>"
-        cards.append(Paragraph(text,ParagraphStyle("card",parent=styles["Normal"],fontSize=10,leading=16,spaceAfter=4)))
+        cards.append([Photo(photos[source]), Spacer(1, 4*mm), Paragraph(text,ParagraphStyle("card",parent=styles["Normal"],fontSize=10,leading=16,spaceAfter=4))])
     while len(cards)%2: cards.append("")
     rows=[cards[i:i+2] for i in range(0,len(cards),2)] or [[Paragraph("Aucun produit",styles["Normal"]),""]]
     table=Table(rows,colWidths=[91*mm,91*mm]); table.setStyle(TableStyle([("BOX",(0,0),(-1,-1),.6,colors.HexColor("#AAAAAA")),("INNERGRID",(0,0),(-1,-1),.4,colors.HexColor("#DDDDDD")),("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#F8FBF9")),("VALIGN",(0,0),(-1,-1),"TOP"),("TOPPADDING",(0,0),(-1,-1),8*mm),("BOTTOMPADDING",(0,0),(-1,-1),8*mm),("LEFTPADDING",(0,0),(-1,-1),5*mm)])); story.append(table)
