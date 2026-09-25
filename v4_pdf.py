@@ -101,7 +101,7 @@ def _catalog_photo(source):
         return None
 
 
-def make_catalog_pdf(products: pd.DataFrame, settings: dict | None = None) -> bytes:
+def make_catalog_pdf(products: pd.DataFrame, settings: dict | None = None, options: dict | None = None) -> bytes:
     """Catalogue prix public avec deux produits par ligne."""
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER
@@ -113,6 +113,26 @@ def make_catalog_pdf(products: pd.DataFrame, settings: dict | None = None) -> by
     settings=settings or {}; output=BytesIO(); styles=getSampleStyleSheet(); green=colors.HexColor("#12372A")
     doc=SimpleDocTemplate(output,pagesize=A4,leftMargin=12*mm,rightMargin=12*mm,topMargin=12*mm,bottomMargin=16*mm,title="Catalogue produits")
     story=logo_flowables() + [Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("shop",parent=styles["Title"],textColor=green,alignment=TA_CENTER)),Paragraph("CATALOGUE PRODUITS",ParagraphStyle("sub",parent=styles["Heading2"],alignment=TA_CENTER)),Spacer(1,6*mm)]
+    from catalog_options import prepare_catalog, order_link, whatsapp_number
+    from reportlab.graphics.barcode.qr import QrCodeWidget
+    from reportlab.graphics.shapes import Drawing
+    options = options or {}
+    products = prepare_catalog(products, options)
+    number = whatsapp_number(options.get('whatsapp', ''))
+    link = order_link(number)
+    if options.get('valid_until'):
+        validity = datetime.fromisoformat(str(options['valid_until'])).strftime('%d/%m/%Y')
+        story.append(Paragraph(f'Prix valables jusqu’au {validity}', styles['Normal']))
+    if link:
+        qr = QrCodeWidget(link)
+        x1, y1, x2, y2 = qr.getBounds()
+        size = 27 * mm
+        drawing = Drawing(size, size, transform=[size/(x2-x1), 0, 0, size/(y2-y1), 0, 0])
+        drawing.add(qr)
+        contact = Paragraph(f'<b>Commandez sur WhatsApp : +{number}</b><br/>Scannez le QR code ou <link href="{escape(link, quote=True)}" color="#12372A"><u>cliquez ici pour commander</u></link>.<br/>Indiquez la référence et la quantité souhaitée.', styles['Normal'])
+        banner = Table([[contact, drawing]], colWidths=[150*mm, 32*mm])
+        banner.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'MIDDLE')]))
+        story.extend([banner, Spacer(1, 4*mm)])
     from reportlab.platypus import Flowable
     from reportlab.lib.utils import ImageReader
 
@@ -139,15 +159,41 @@ def make_catalog_pdf(products: pd.DataFrame, settings: dict | None = None) -> by
                 self.canv.drawCentredString(self.width / 2, self.height / 2, 'Photo indisponible')
 
     cards=[]
+    category = None
+    def add_cards():
+        from reportlab.platypus import KeepTogether
+        if not cards:
+            return
+        if len(cards) % 2:
+            cards.append('')
+        for i in range(0, len(cards), 2):
+            table = Table([cards[i:i+2]], colWidths=[91*mm]*2)
+            table.setStyle(TableStyle([('GRID',(0,0),(-1,-1),.4,colors.HexColor('#DDDDDD')),('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#F8FBF9')),('VALIGN',(0,0),(-1,-1),'TOP'),('TOPPADDING',(0,0),(-1,-1),5*mm),('BOTTOMPADDING',(0,0),(-1,-1),5*mm),('LEFTPADDING',(0,0),(-1,-1),5*mm)]))
+            if i == 0:
+                story.append(KeepTogether([Paragraph(escape(category), styles['Heading2']), table]))
+            else:
+                story.append(table)
+        story.append(Spacer(1, 5*mm))
+        cards.clear()
     photos = {}
     for _,r in products.iterrows():
+        if category != r['Categorie']:
+            add_cards()
+            category = r['Categorie']
         source = r.get('Photo', '')
         source = source.strip() if isinstance(source, str) else ''
         if source not in photos:
             photos[source] = _catalog_photo(source)
-        text=f"<b>{escape(str(r.get('Produit','')))}</b><br/>{escape(str(r.get('Categorie','') or ''))}<br/><font color='#12372A' size='13'><b>{_money(r.get('Vente',0))}</b></font>"
+        price = _money(r.get('Vente',0))
+        if pd.notna(r.get('Promo')):
+            price = f"<strike>{price}</strike><br/><font color='#B43D22'>PROMO : {_money(r['Promo'])}</font>"
+        ref = escape(r['Reference'])
+        text=f"<b>{escape(str(r.get('Produit','')))}</b><br/>Réf. : {ref}<br/><font color='#12372A' size='13'><b>{price}</b></font>"
+        if link:
+            item_link = order_link(number, f"Bonjour, je souhaite commander {r['Produit']} (réf. {r['Reference']}). Quantité : ")
+            text += f'<br/><link href="{escape(item_link, quote=True)}" color="#12372A"><u>Commander sur WhatsApp</u></link>'
         cards.append([Photo(photos[source]), Spacer(1, 4*mm), Paragraph(text,ParagraphStyle("card",parent=styles["Normal"],fontSize=10,leading=16,spaceAfter=4))])
-    while len(cards)%2: cards.append("")
-    rows=[cards[i:i+2] for i in range(0,len(cards),2)] or [[Paragraph("Aucun produit",styles["Normal"]),""]]
-    table=Table(rows,colWidths=[91*mm,91*mm]); table.setStyle(TableStyle([("BOX",(0,0),(-1,-1),.6,colors.HexColor("#AAAAAA")),("INNERGRID",(0,0),(-1,-1),.4,colors.HexColor("#DDDDDD")),("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#F8FBF9")),("VALIGN",(0,0),(-1,-1),"TOP"),("TOPPADDING",(0,0),(-1,-1),8*mm),("BOTTOMPADDING",(0,0),(-1,-1),8*mm),("LEFTPADDING",(0,0),(-1,-1),5*mm)])); story.append(table)
+    add_cards()
+    if products.empty:
+        story.append(Paragraph('Aucun produit', styles['Normal']))
     build_document(doc, story, settings); return output.getvalue()

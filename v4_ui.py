@@ -56,8 +56,8 @@ def impression_page(user):
             smap={r.Fournisseur:r for _,r in suppliers.iterrows()}; name=st.selectbox("Fournisseur",list(smap),key="statement_supplier"); row=smap[name]; history=v4.supplier_statement(int(row.id)); st.dataframe(history,hide_index=True,width="stretch")
             st.download_button("Imprimer le relevé fournisseur",make_statement_pdf("Relevé fournisseur",row.to_dict(),history,settings),file_name=f"releve_fournisseur_{int(row.id)}.pdf",mime="application/pdf",icon=":material/print:",width="stretch")
     with catalog_tab:
-        available=products[products.Stock>0] if not products.empty else products; st.dataframe(available[[c for c in ["Produit","Categorie","Vente","Stock","Photo"] if c in available]],hide_index=True,width="stretch",column_config={"Photo":st.column_config.ImageColumn("Photo")})
-        st.download_button("Imprimer le catalogue clients",make_catalog_pdf(available,settings),file_name=f"catalogue_{date.today()}.pdf",mime="application/pdf",icon=":material/menu_book:",width="stretch")
+        from catalog_ui import catalog_panel
+        catalog_panel(products, settings)
 
 
 def search_page():
