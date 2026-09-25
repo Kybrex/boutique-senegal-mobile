@@ -483,7 +483,19 @@ elif page == "Clients":
         if st.form_submit_button("Ajouter le client", type="primary"):
             try: db.add_client(name, phone, email, address); st.success("Client ajouté.")
             except Exception: st.error("Le nom du client est obligatoire et doit être unique.")
-    st.dataframe(db.clients(), hide_index=True)
+    customer_list = db.clients()
+    st.dataframe(customer_list, hide_index=True)
+    if is_admin and not customer_list.empty:
+        with st.expander("Supprimer un client"):
+            customer_map = dict(zip(customer_list.Client, customer_list.id))
+            customer_name = st.selectbox("Client à supprimer", list(customer_map))
+            confirm = st.checkbox(f"Je confirme la suppression de {customer_name}", key=f"delete_client_confirm_{customer_map[customer_name]}")
+            if st.button("Supprimer le client", disabled=not confirm):
+                try:
+                    db.delete_client(int(customer_map[customer_name]))
+                    db.log_action(int(user["id"]), "CLIENT_SUPPRIME", f"{customer_name} (#{int(customer_map[customer_name])})")
+                    st.success("Client supprimé."); st.rerun()
+                except ValueError as error: st.error(str(error))
 
 elif page == "Fournisseurs":
     with st.form("mobile_supplier"):
@@ -491,7 +503,19 @@ elif page == "Fournisseurs":
         if st.form_submit_button("Ajouter le fournisseur", type="primary"):
             try: db.add_supplier(name, contact, phone, email, address); st.success("Fournisseur ajouté.")
             except Exception: st.error("Le nom du fournisseur est obligatoire et doit être unique.")
-    st.dataframe(db.suppliers(), hide_index=True)
+    supplier_list = db.suppliers()
+    st.dataframe(supplier_list, hide_index=True)
+    if is_admin and not supplier_list.empty:
+        with st.expander("Supprimer un fournisseur"):
+            supplier_map = dict(zip(supplier_list.Fournisseur, supplier_list.id))
+            supplier_to_delete = st.selectbox("Fournisseur à supprimer", list(supplier_map))
+            confirm = st.checkbox(f"Je confirme la suppression de {supplier_to_delete}", key=f"delete_supplier_confirm_{supplier_map[supplier_to_delete]}")
+            if st.button("Supprimer le fournisseur", disabled=not confirm):
+                try:
+                    db.delete_supplier(int(supplier_map[supplier_to_delete]))
+                    db.log_action(int(user["id"]), "FOURNISSEUR_SUPPRIME", f"{supplier_to_delete} (#{int(supplier_map[supplier_to_delete])})")
+                    st.success("Fournisseur supprimé."); st.rerun()
+                except ValueError as error: st.error(str(error))
     if v3.v3_ready():
         orders = v3.purchase_orders()
         if not orders.empty:
@@ -605,7 +629,7 @@ elif page in ("Rapports", "Historique"):
         st.download_button("Exporter les ventes", export_sales, file_name=f"ventes_{start}_{end}.csv", mime="text/csv")
         st.download_button("Exporter le stock", export_stock, file_name="stock.csv", mime="text/csv")
     if not sales.empty:
-        with st.expander("Corriger ou supprimer une vente", icon=":material/edit_note:"):
+        with st.expander("Administration : corriger ou annuler une vente", icon=":material/edit_note:"):
             ticket_map = {
                 f"Ticket #{row.Ticket} · {row.Date} · {row.Client} · {fcfa(float(row.Total))}": int(row.Ticket)
                 for _, row in sales.iterrows()
@@ -624,13 +648,16 @@ elif page in ("Rapports", "Historique"):
             selected_client = next((name for name, identifier in client_options.items() if identifier == sale["client_id"]), "Vente comptant")
             with st.form(f"edit_sale_{sale_id}"):
                 client_name = st.selectbox("Client", client_names, index=client_names.index(selected_client))
-                methods = ["Especes", "Wave", "Orange Money", "Carte", "Credit"]
+                methods = ["Especes", "Espèces", "Wave", "Orange Money", "Carte", "Credit"]
                 payment = st.selectbox("Paiement", methods, index=methods.index(sale["payment_method"]) if sale["payment_method"] in methods else 0)
                 paid = st.number_input("Montant encaissé", min_value=0.0, value=float(sale["paid"]), step=100.0)
                 discount = st.number_input("Réduction (FCFA)", min_value=0.0, value=float(sale["discount"]), max_value=float(sale_items.Total.sum()), step=100.0)
+                reason = st.text_input("Motif de la correction")
                 if st.form_submit_button("Enregistrer la correction", type="primary", icon=":material/save:"):
                     try:
+                        if not reason.strip(): raise ValueError("Indiquez le motif de la correction.")
                         _, new_total = db.update_sale(sale_id, client_options[client_name], paid, payment, discount)
+                        db.log_action(int(user["id"]), "VENTE_CORRIGEE", f"Ticket #{sale_id}: {sale['total']} → {new_total} FCFA, encaissé {sale['paid']} → {paid}, {sale['payment_method']} → {payment}; {reason.strip()}")
                         st.success(f"Vente corrigée. Nouveau total : {fcfa(new_total)}")
                         st.rerun()
                     except ValueError as error:
@@ -639,15 +666,18 @@ elif page in ("Rapports", "Historique"):
                 if st.button("Traiter un retour ou un échange"):
                     st.session_state.mobile_page = "Retours V3"
                     st.rerun()
-            st.warning("Supprimer une vente est définitif. Les quantités vendues seront remises en stock.", icon=":material/warning:")
+            st.warning("Seules les ventes non encaissées, sans retour, paiement complémentaire ou facture émise peuvent être supprimées. Le stock sera restauré. Pour une vente encaissée, utilisez Retours et échanges.", icon=":material/warning:")
             confirm_delete = st.checkbox("Je confirme la suppression de cette vente", key=f"confirm_delete_sale_{sale_id}")
+            delete_reason = st.text_input("Motif de l'annulation", key=f"delete_reason_{sale_id}")
             if st.button("Supprimer définitivement", icon=":material/delete:", key=f"delete_sale_{sale_id}"):
-                if not confirm_delete:
-                    st.error("Cochez la confirmation avant de supprimer la vente.")
+                if not confirm_delete or not delete_reason.strip():
+                    st.error("Confirmez la suppression et indiquez son motif.")
                 else:
                     try:
+                        if any(e.get("kind")=="invoice" and e.get("source")=="VENTE" and e.get("source_id")==sale_id for e in workflows.entries(user)):
+                            raise ValueError("Une facture est déjà émise : cette vente ne peut pas être supprimée.")
                         db.delete_sale(sale_id)
-                        if db.v2_ready(): db.log_action(int(user["id"]), "VENTE_SUPPRIMEE", f"Ticket #{sale_id}")
+                        if db.v2_ready(): db.log_action(int(user["id"]), "VENTE_SUPPRIMEE", f"Ticket #{sale_id}, {sale['total']} FCFA; {delete_reason.strip()}")
                         st.success("Vente supprimée et stock restauré.")
                         st.rerun()
                     except ValueError as error:
