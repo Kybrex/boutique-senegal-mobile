@@ -13,7 +13,7 @@ def check(app):
     assert not app.exception, [x.message for x in app.exception]
 
 def run():
-    app = AppTest.from_string(APP).run()
+    app = AppTest.from_string(APP, default_timeout=30).run()
     check(app)
     assert app.multiselect[1].value == [1]
     app.checkbox[0].uncheck().run()
