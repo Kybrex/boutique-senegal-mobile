@@ -164,20 +164,20 @@ if st.session_state.mobile_page not in allowed:
 current = st.session_state.mobile_page
 active_section = next((name for name, routes in sections.items()
                        if current in [route for route, _ in routes]), "Réglages")
+def navigate_to(route):
+    st.session_state.mobile_page = route
 with st.sidebar:
     st.image(str(LOGO_PATH), width=180)
     st.header("Boutique Sénégal")
     for name, routes in sections.items():
-        if st.button(name, key=f"simple_nav_{name}", width="stretch",
-                     type="primary" if name == active_section else "secondary"):
-            st.session_state.mobile_page = routes[0][0]
-            st.rerun()
+        st.button(name, key=f"simple_nav_{name}", width="stretch",
+                  type="primary" if name == active_section else "secondary",
+                  on_click=navigate_to, args=(routes[0][0],))
     if is_admin:
         with st.expander("Réglages"):
             for route, label in settings_pages:
-                if st.button(label, key=f"simple_settings_{route}", width="stretch"):
-                    st.session_state.mobile_page = route
-                    st.rerun()
+                st.button(label, key=f"simple_settings_{route}", width="stretch",
+                          on_click=navigate_to, args=(route,))
     st.button("Verrouiller maintenant", icon=":material/lock:", on_click=session_guard.manual_lock, width="stretch")
     st.caption(f"Verrouillage après {int(st.session_state.get('_auth_timeout',300)//60)} min sans activité.")
     st.button("Se déconnecter", icon=":material/logout:", on_click=sign_out, width="stretch")
