@@ -126,6 +126,20 @@ def create_seller_with_user(name: str, phone: str, email: str, username: str, pa
         conn.commit()
 def add_supplier(name: str, contact: str, phone: str, email: str, address: str) -> None: execute("INSERT INTO suppliers(name,contact,phone,email,address) VALUES(?,?,?,?,?)", (name.strip(), contact.strip(), phone.strip(), email.strip().lower(), address.strip()))
 def add_client(name: str, phone: str, email: str, address: str) -> None: execute("INSERT INTO clients(name,phone,email,address) VALUES(?,?,?,?)", (name.strip(), phone.strip(), email.strip().lower(), address.strip()))
+def delete_client(client_id: int) -> None:
+    with connection() as conn:
+        if not conn.execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone(): raise ValueError("Client introuvable.")
+        for table in ("sales", "credit_payments", "documents"):
+            if conn.execute(f"SELECT 1 FROM {table} WHERE client_id=? LIMIT 1", (client_id,)).fetchone():
+                raise ValueError("Ce client possède un historique de ventes, paiements ou documents et ne peut pas être supprimé.")
+        conn.execute("DELETE FROM clients WHERE id=?", (client_id,)); conn.commit()
+def delete_supplier(supplier_id: int) -> None:
+    with connection() as conn:
+        if not conn.execute("SELECT 1 FROM suppliers WHERE id=?", (supplier_id,)).fetchone(): raise ValueError("Fournisseur introuvable.")
+        for table in ("products", "purchase_orders"):
+            if conn.execute(f"SELECT 1 FROM {table} WHERE supplier_id=? LIMIT 1", (supplier_id,)).fetchone():
+                raise ValueError("Ce fournisseur est lié à des produits ou commandes et ne peut pas être supprimé.")
+        conn.execute("DELETE FROM suppliers WHERE id=?", (supplier_id,)); conn.commit()
 def save_sale(cart: list[dict], seller_id: int, client_id: int | None, paid: float, method: str, discount: float, due_date=None) -> tuple[int, float, float]:
     gross = sum(item["quantity"] * item["sale_price"] for item in cart); discount = max(0, min(discount, gross)); total = gross-discount
     with connection() as conn:
@@ -147,8 +161,8 @@ def sale_details(sale_id: int) -> tuple[dict, pd.DataFrame] | None:
     items = query("SELECT si.product_id,p.name AS Produit,si.quantity AS Quantite,si.unit_price AS Prix,si.quantity*si.unit_price AS Total FROM sale_items si LEFT JOIN products p ON p.id=si.product_id WHERE si.sale_id=? ORDER BY si.id", (sale_id,))
     return sale.iloc[0].to_dict(), items
 def update_sale(sale_id: int, client_id: int | None, paid: float, method: str, discount: float) -> tuple[float, float]:
-    if paid < 0:
-        raise ValueError("Le montant encaissé ne peut pas être négatif.")
+    if paid < 0 or discount < 0 or method not in {"Especes", "Espèces", "Wave", "Orange Money", "Carte", "Credit"}:
+        raise ValueError("Montant ou paiement invalide.")
     with connection() as conn:
         exists = conn.execute("SELECT id FROM sales WHERE id=?", (sale_id,)).fetchone()
         if exists is None:
@@ -156,14 +170,19 @@ def update_sale(sale_id: int, client_id: int | None, paid: float, method: str, d
         gross = float(conn.execute("SELECT COALESCE(SUM(quantity*unit_price),0) AS gross FROM sale_items WHERE sale_id=?", (sale_id,)).fetchone()["gross"])
         discount = max(0, min(float(discount), gross))
         total = gross - discount
+        if paid > total: raise ValueError("Le montant encaissé dépasse le total corrigé.")
         conn.execute("UPDATE sales SET client_id=?,paid=?,payment_method=?,discount=?,total=? WHERE id=?", (client_id, paid, method, discount, total, sale_id))
         conn.commit()
     return gross, total
 def delete_sale(sale_id: int) -> None:
     with connection() as conn:
         items = conn.execute("SELECT product_id,quantity FROM sale_items WHERE sale_id=?", (sale_id,)).fetchall()
-        if conn.execute("SELECT id FROM sales WHERE id=?", (sale_id,)).fetchone() is None:
+        sale = conn.execute("SELECT paid FROM sales WHERE id=?", (sale_id,)).fetchone()
+        if sale is None:
             raise ValueError("Vente introuvable.")
+        if float(sale["paid"] or 0) > 0: raise ValueError("Vente encaissée : utilisez le retour et remboursement pour conserver le journal de caisse.")
+        if any(conn.execute(f"SELECT 1 FROM {table} WHERE sale_id=? LIMIT 1", (sale_id,)).fetchone() for table in ("credit_payments", "returns")):
+            raise ValueError("Cette vente possède un paiement ou un retour et ne peut pas être supprimée.")
         for item in items:
             conn.execute("UPDATE products SET stock=stock+? WHERE id=?", (item["quantity"], item["product_id"]))
             current = conn.execute("SELECT stock FROM products WHERE id=?", (item["product_id"],)).fetchone()["stock"]
@@ -356,6 +375,7 @@ try:
         def create_seller_with_user(name, phone, email, username, password): _cloud.create_seller_with_user(name.strip(), phone.strip(), email.strip().lower(), username.strip().lower(), password_hash(password))
         def add_supplier(name, contact, phone, email, address): _cloud.add_supplier(name.strip(), contact.strip(), phone.strip(), email.strip().lower(), address.strip())
         def add_client(name, phone, email, address): _cloud.add_client(name.strip(), phone.strip(), email.strip().lower(), address.strip())
+        delete_client = _cloud.delete_client; delete_supplier = _cloud.delete_supplier
         save_sale = _cloud.save_sale; add_expense = _cloud.add_expense
         products = _cloud.products; sellers = _cloud.sellers; suppliers = _cloud.suppliers; clients = _cloud.clients; users = _cloud.users; low_stock = _cloud.low_stock
         today_summary = _cloud.today_summary; report = _cloud.report; expenses = _cloud.expenses

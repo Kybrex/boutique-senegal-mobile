@@ -74,6 +74,18 @@ def create_seller_with_user(name, phone, email, username, password_hash):
 
 def add_supplier(name, contact, phone, email, address): _table("suppliers").insert({"name": name, "contact": contact, "phone": phone, "email": email, "address": address}).execute()
 def add_client(name, phone, email, address): _table("clients").insert({"name": name, "phone": phone, "email": email, "address": address}).execute()
+def delete_client(client_id):
+    if _one("clients", id=client_id) is None: raise ValueError("Client introuvable.")
+    for table in ("sales", "credit_payments", "documents"):
+        if _data(_table(table).select("id").eq("client_id",client_id).limit(1).execute()):
+            raise ValueError("Ce client possède un historique de ventes, paiements ou documents et ne peut pas être supprimé.")
+    _table("clients").delete().eq("id",client_id).execute()
+def delete_supplier(supplier_id):
+    if _one("suppliers", id=supplier_id) is None: raise ValueError("Fournisseur introuvable.")
+    for table in ("products", "purchase_orders"):
+        if _data(_table(table).select("id").eq("supplier_id",supplier_id).limit(1).execute()):
+            raise ValueError("Ce fournisseur est lié à des produits ou commandes et ne peut pas être supprimé.")
+    _table("suppliers").delete().eq("id",supplier_id).execute()
 
 
 def products() -> pd.DataFrame:
@@ -179,11 +191,16 @@ def sale_details(sale_id):
 def update_sale(sale_id, client_id, paid, method, discount):
     details = sale_details(sale_id)
     if details is None: raise ValueError("Vente introuvable.")
+    if paid < 0 or discount < 0 or method not in {"Especes", "Espèces", "Wave", "Orange Money", "Carte", "Credit"}: raise ValueError("Montant ou paiement invalide.")
     _, items = details; gross = float(items.Total.sum()); discount = max(0, min(float(discount), gross)); total = gross - discount
+    if paid > total: raise ValueError("Le montant encaissé dépasse le total corrigé.")
     _table("sales").update({"client_id": client_id, "paid": paid, "payment_method": method, "discount": discount, "total": total}).eq("id", sale_id).execute(); return gross, total
 def delete_sale(sale_id):
     details = sale_details(sale_id)
     if details is None: raise ValueError("Vente introuvable.")
+    if float(details[0].get("paid") or 0) > 0: raise ValueError("Vente encaissée : utilisez le retour et remboursement pour conserver le journal de caisse.")
+    for table in ("credit_payments", "returns"):
+        if _data(_table(table).select("id").eq("sale_id",sale_id).limit(1).execute()): raise ValueError("Cette vente possède un paiement ou un retour et ne peut pas être supprimée.")
     items = _data(_table("sale_items").select("product_id,quantity").eq("sale_id", sale_id).execute())
     for item in items: adjust_stock(item["product_id"], int(item["quantity"]))
     _table("sale_items").delete().eq("sale_id", sale_id).execute(); _table("sales").delete().eq("id", sale_id).execute()

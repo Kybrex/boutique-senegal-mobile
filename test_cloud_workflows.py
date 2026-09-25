@@ -2,6 +2,7 @@
 from unittest.mock import patch
 from types import SimpleNamespace
 import workflow_service as service
+import cloud_db as cloud
 
 def run():
     objects={}
@@ -55,6 +56,30 @@ def run():
         result=service.entries({'id':1,'role':'admin'})
         assert len(result)==451
         assert pages==[(0,199),(200,399),(400,599),(451,650)]
+    deleted=[]
+    references={'sales':[{'id':10}], 'credit_payments':[], 'documents':[], 'products':[], 'purchase_orders':[]}
+    class Related:
+        def __init__(self,name): self.name=name; self.deleting=False
+        def select(self,*args): return self
+        def eq(self,*args): return self
+        def limit(self,*args): return self
+        def delete(self): self.deleting=True; return self
+        def execute(self):
+            if self.deleting: deleted.append(self.name); return SimpleNamespace(data=[])
+            return SimpleNamespace(data=references.get(self.name,[]))
+    with patch.object(cloud,'_one',return_value={'id':1}),patch.object(cloud,'_table',side_effect=Related):
+        try: cloud.delete_client(1)
+        except ValueError: pass
+        else: raise AssertionError('Linked customer deleted')
+        assert deleted==[]
+        references['sales']=[]
+        cloud.delete_client(1)
+        assert deleted==['clients']
+        references['products']=[{'id':3}]
+        try: cloud.delete_supplier(1)
+        except ValueError: pass
+        else: raise AssertionError('Linked supplier deleted')
+        assert deleted==['clients']
     print('PASS: private cloud storage, create-only collision handling, failures surfaced, complete archive pagination')
 
 if __name__=='__main__':
