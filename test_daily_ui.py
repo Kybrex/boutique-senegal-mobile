@@ -23,6 +23,8 @@ def run():
         next(w for w in at.text_input if w.label=="Nom d'utilisateur").set_value('admin')
         next(w for w in at.text_input if w.label=='Mot de passe').set_value('test-password')
         button(at,'Se connecter').click().run(); check(at)
+        at.session_state['mobile_page']='Journal ventes'; at.run(); check(at)
+        assert any(h.value=='Journal des ventes' for h in at.header)
         button(at,'Clients').click().run(); check(at)
         next(w for w in at.selectbox if w.label=='Client à supprimer').set_value('Client libre').run(); check(at)
         next(w for w in at.checkbox if w.label=='Je confirme la suppression de Client libre').check().run(); check(at)

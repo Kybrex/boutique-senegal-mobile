@@ -58,6 +58,7 @@ import business_features_ui as features_ui
 import workflow_service as workflows
 import workflow_ui
 import session_guard
+import sales_journal
 
 db.init_db()
 st.session_state.setdefault("mobile_cart", [])
@@ -141,7 +142,7 @@ if is_admin and v4.v4_ready() and not st.session_state.get("v4_session_tasks_don
 # Seven everyday sections. Existing internal routes remain compatible with documents.
 sections = {
     "Tableau de bord": [("Accueil", "Vue d'ensemble"), ("Rapports", "Rapports et dépenses"), ("Bénéfice", "Bénéfice")],
-    "Ventes": [("Caisse", "Nouvelle vente"), ("Historique", "Historique"), ("Retours V3", "Retours et échanges"), ("Clôture", "Caisse journalière"), ("Paiements", "Paiements par mode")],
+    "Ventes": [("Caisse", "Nouvelle vente"), ("Historique", "Historique"), ("Journal ventes", "Journal des ventes"), ("Retours V3", "Retours et échanges"), ("Clôture", "Caisse journalière"), ("Paiements", "Paiements par mode")],
     "Achats": [("Achats", "Achat reçu"), ("Commandes", "Commandes et règlements"), ("Justificatifs", "Justificatifs")],
     "Stock": [("Produits", "Produits et quantités"), ("Inventaire", "Inventaire"), ("Réapprovisionnement", "À commander"), ("Impression", "Codes-barres et impressions")],
     "Fournisseurs": [("Fournisseurs", "Fournisseurs"), ("Dettes fournisseurs", "Sommes à payer")],
@@ -246,6 +247,30 @@ elif page == "Accueil":
         expiry=v3.expiry_alerts()
         if not expiry.empty:
             st.subheader("Lots à surveiller",icon=":material/event_busy:"); st.dataframe(expiry,hide_index=True,width="stretch")
+    st.download_button("Imprimer le tableau de bord en PDF", sales_journal.dashboard_pdf(date.today(), float(summary.sales), int(summary.transactions), alerts, purchase_total, db.credit_alerts() if db.v2_ready() else pd.DataFrame(), db.get_settings() if db.v2_ready() else {}), file_name=f"tableau_de_bord_{date.today():%Y-%m-%d}.pdf", mime="application/pdf", icon=":material/picture_as_pdf:")
+
+elif page == "Journal ventes":
+    st.header("Journal des ventes", icon=":material/receipt_long:")
+    period_name = st.selectbox("Regroupement", ["Jour", "Semaine", "Mois"])
+    reference_day = st.date_input("Date de référence", value=date.today())
+    start, end = sales_journal.period_bounds(period_name, reference_day)
+    st.caption(f"Du {start:%d/%m/%Y} au {end:%d/%m/%Y}")
+    period_sales = db.report(start, end)
+    seller_names = sorted(set(period_sales["Vendeur"].dropna().astype(str))) if not period_sales.empty else []
+    seller_name = st.selectbox("Vendeur", ["Tous les vendeurs"] + seller_names)
+    journal = sales_journal.journal_rows(period_sales, seller_name)
+    summary_by_seller = sales_journal.journal_summary(journal)
+    with st.container(border=True):
+        st.metric("Tickets", len(journal))
+        st.metric("Ventes", fcfa(float(journal.Total.sum())))
+        st.metric("Encaissé", fcfa(float(journal.Encaisse.sum())))
+        st.metric("Reste à encaisser", fcfa(float(journal.Total.sum() - journal.Encaisse.sum())))
+    st.subheader("Totaux par vendeur")
+    st.dataframe(summary_by_seller, hide_index=True, width="stretch")
+    st.subheader("Détail des ventes")
+    st.dataframe(journal, hide_index=True, width="stretch")
+    st.download_button("Imprimer le journal en PDF", sales_journal.journal_pdf(journal, period_name, start, end, seller_name, db.get_settings() if db.v2_ready() else {}), file_name=f"journal_ventes_{period_name.lower()}_{start:%Y-%m-%d}_{seller_name.replace(' ', '_')}.pdf", mime="application/pdf", icon=":material/picture_as_pdf:")
+    st.download_button("Exporter le journal en CSV", journal.to_csv(index=False).encode("utf-8-sig"), file_name=f"journal_ventes_{start:%Y-%m-%d}_{end:%Y-%m-%d}.csv", mime="text/csv")
 
 elif page == "Caisse":
     products = db.products()
