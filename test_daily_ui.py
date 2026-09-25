@@ -22,10 +22,10 @@ def run():
         next(w for w in at.text_input if w.label=='Mot de passe').set_value('test-password')
         button(at,'Se connecter').click().run(); check(at)
         button(at,'Stock').click().run(); check(at)
-        next(w for w in at.radio if w.label=='Afficher').set_value('Inventaire').run(); check(at)
+        button(at,'Inventaire').click().run(); check(at)
         assert at.session_state['mobile_page']=='Inventaire'
         assert any(h.value=='Inventaire physique' for h in at.header)
-        next(w for w in at.radio if w.label=='Afficher').set_value('Produits').run(); check(at)
+        button(at,'Produits et quantités').click().run(); check(at)
         assert any(h.value=='Produits et stock' for h in at.header)
         next(w for w in at.number_input if w.label=='Quantité').set_value(17)
         button(at,'Enregistrer le stock').click().run(); check(at)

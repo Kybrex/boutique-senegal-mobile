@@ -187,15 +187,13 @@ if is_admin:
 st.subheader(active_section)
 routes = settings_pages if active_section == "Réglages" else sections[active_section]
 if len(routes) > 1:
-    route_labels = dict(routes)
-    route_names = list(route_labels)
-    view_key = f"simple_view_{active_section}"
-    if st.session_state.get(view_key) != current:
-        st.session_state[view_key] = current
-    def select_view():
-        st.session_state.mobile_page = st.session_state[view_key]
-    st.radio("Afficher", route_names, format_func=route_labels.get, horizontal=True,
-             key=view_key, on_change=select_view, label_visibility="collapsed")
+    for start in range(0, len(routes), 2):
+        columns = st.columns(2)
+        for column, (route, label) in zip(columns, routes[start:start + 2]):
+            with column:
+                st.button(label, key=f"simple_view_{active_section}_{route}",
+                          type="primary" if route == current else "secondary",
+                          on_click=navigate_to, args=(route,), width="stretch")
 page = st.session_state.mobile_page
 
 if page == "Bénéfice":
