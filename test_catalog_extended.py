@@ -4,6 +4,7 @@ from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+import json
 import pandas as pd
 from pypdf import PdfReader
 from catalog_library import save_catalog, list_catalogs, restore_catalog
@@ -33,7 +34,10 @@ def run():
     def write(key,value,user):
         require_admin(user)
         store[key] = deepcopy(value)
-    features = SimpleNamespace(require_admin=require_admin, read_setting=lambda k,d: deepcopy(store.get(k,d)), write_setting=write)
+    def execute(sql, params):
+        store[params[1].removeprefix('BOUTIQUE_CONFIG:')] = json.loads(params[2])
+    features = SimpleNamespace(require_admin=require_admin, read_setting=lambda k,d: deepcopy(store.get(k,d)),
+                               cloud=SimpleNamespace(enabled=lambda:False), db=SimpleNamespace(execute=execute))
     user={'id':1,'role':'admin'}
     preset={'product_ids':[1,2,999],'only_stock':True,'options':options}
     with patch.dict('sys.modules', {'business_features':features}):

@@ -4,10 +4,37 @@ from datetime import datetime, timezone
 import json
 
 
+class CatalogDataError(ValueError):
+    def __init__(self, recovered):
+        super().__init__('Un ancien enregistrement de catalogue est incomplet. Rechargez une version disponible ou recomposez le catalogue, puis enregistrez-le à nouveau.')
+        self.recovered = recovered
+
+
 def list_catalogs(user):
     import business_features as features
     features.require_admin(user)
-    return features.read_setting(f'catalogues:{int(user["id"])}', {}).get('items', {})
+    key = f'catalogues:{int(user["id"])}'
+    try:
+        value = features.read_setting(key, {})
+        if not isinstance(value, dict) or not isinstance(value.get('items', {}), dict):
+            raise ValueError('Invalid catalogue data')
+        return value.get('items', {})
+    except (ValueError, TypeError):
+        # Keep every original event. Recover the latest complete snapshot if an
+        # old audit-log writer truncated the newest JSON payload.
+        action = 'BOUTIQUE_CONFIG:' + key
+        if features.cloud.enabled():
+            rows = features.cloud._table('activity_logs').select('details').eq('action', action).order('id', desc=True).limit(50).execute().data or []
+        else:
+            rows = features.db.query('SELECT details FROM activity_logs WHERE action=? ORDER BY id DESC LIMIT 50', (action,)).to_dict('records')
+        for row in rows:
+            try:
+                value = json.loads(row['details'])
+                if isinstance(value, dict) and isinstance(value.get('items'), dict):
+                    raise CatalogDataError(value['items'])
+            except (json.JSONDecodeError, TypeError):
+                continue
+        raise CatalogDataError({})
 
 
 def save_catalog(user, name, preset):
@@ -21,11 +48,20 @@ def save_catalog(user, name, preset):
     value['updated_at'] = datetime.now(timezone.utc).isoformat()
     if len(json.dumps(value, ensure_ascii=False)) > 200000:
         raise ValueError('Ce catalogue contient trop de texte pour être enregistré.')
-    items = list_catalogs(user)
+    try:
+        items = list_catalogs(user)
+    except CatalogDataError as exc:
+        items = exc.recovered
     if name not in items and len(items) >= 50:
         raise ValueError('Vous avez déjà 50 catalogues enregistrés.')
     items[name] = value
-    features.write_setting(f'catalogues:{int(user["id"])}', {'items': items}, user)
+    action = f'BOUTIQUE_CONFIG:catalogues:{int(user["id"])}'
+    payload = json.dumps({'items':items}, ensure_ascii=False)
+    # Do not use log_action: the general audit writer truncates at 500 chars.
+    if features.cloud.enabled():
+        features.cloud._table('activity_logs').insert({'user_id':int(user['id']), 'action':action, 'details':payload}).execute()
+    else:
+        features.db.execute('INSERT INTO activity_logs(user_id,action,details) VALUES(?,?,?)', (int(user['id']), action, payload))
 
 
 def restore_catalog(state, preset, products):
