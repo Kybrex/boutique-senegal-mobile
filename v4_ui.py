@@ -57,7 +57,7 @@ def impression_page(user):
             st.download_button("Imprimer le relevé fournisseur",make_statement_pdf("Relevé fournisseur",row.to_dict(),history,settings),file_name=f"releve_fournisseur_{int(row.id)}.pdf",mime="application/pdf",icon=":material/print:",width="stretch")
     with catalog_tab:
         from catalog_ui import catalog_panel
-        catalog_panel(products, settings)
+        catalog_panel(products, settings, user)
 
 
 def search_page():

@@ -40,7 +40,7 @@ def prepare_catalog(products, options):
     result = products.copy()
     result['Categorie'] = result.get('Categorie', '').fillna('').astype(str).str.strip() if 'Categorie' in result else ''
     result['Categorie'] = result['Categorie'].replace('', 'Autres produits')
-    promotions = options.get('promotions', {})
+    promotions = options.get('promotions', {}) if options.get('show_prices', True) else {}
     valid_until = options.get('valid_until')
     if valid_until and date.fromisoformat(str(valid_until)) < date.today():
         raise ValueError('La date de validité est dépassée. Choisissez une date actuelle ou future.')
@@ -57,4 +57,17 @@ def prepare_catalog(products, options):
         prices.append(value)
     result['Promo'] = prices
     result['Reference'] = [reference(row) for _, row in result.iterrows()]
+    details = options.get('details', {})
+    for field, limit in [('Description', 300), ('Tailles', 100), ('Couleurs', 100)]:
+        values = []
+        for _, row in result.iterrows():
+            key = str(int(row['id'])) if 'id' in row else ''
+            value = str(details.get(key, {}).get(field, '') or '').strip()
+            if len(value) > limit:
+                raise ValueError(f'{field} : limitez le texte à {limit} caractères par produit.')
+            values.append(value)
+        result[field] = values
+    for field in ('delivery_zones', 'delivery_fees', 'delivery_times'):
+        if len(str(options.get(field, ''))) > 300:
+            raise ValueError('Limitez chaque condition de livraison à 300 caractères.')
     return result.sort_values(['Categorie', 'Produit'], kind='stable') if not result.empty else result

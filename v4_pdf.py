@@ -112,17 +112,34 @@ def make_catalog_pdf(products: pd.DataFrame, settings: dict | None = None, optio
 
     settings=settings or {}; output=BytesIO(); styles=getSampleStyleSheet(); green=colors.HexColor("#12372A")
     doc=SimpleDocTemplate(output,pagesize=A4,leftMargin=12*mm,rightMargin=12*mm,topMargin=12*mm,bottomMargin=16*mm,title="Catalogue produits")
-    story=logo_flowables() + [Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("shop",parent=styles["Title"],textColor=green,alignment=TA_CENTER)),Paragraph("CATALOGUE PRODUITS",ParagraphStyle("sub",parent=styles["Heading2"],alignment=TA_CENTER)),Spacer(1,6*mm)]
+    options = options or {}
+    story=logo_flowables() + [Paragraph(escape(str(settings.get("shop_name","Boutique Senegal"))),ParagraphStyle("shop",parent=styles["Title"],textColor=green,alignment=TA_CENTER)),Paragraph(escape(str(options.get('title') or 'CATALOGUE PRODUITS')),ParagraphStyle("sub",parent=styles["Heading2"],alignment=TA_CENTER)),Spacer(1,6*mm)]
     from catalog_options import prepare_catalog, order_link, whatsapp_number
     from reportlab.graphics.barcode.qr import QrCodeWidget
     from reportlab.graphics.shapes import Drawing
     options = options or {}
     products = prepare_catalog(products, options)
+    show_prices = options.get('show_prices', True)
+    if options.get('cover'):
+        from reportlab.platypus import PageBreak
+        center = ParagraphStyle('CoverText', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, leading=18)
+        cover_story = [Spacer(1, 24*mm)] + logo_flowables(width=180)
+        cover_story += [Spacer(1, 12*mm), Paragraph('Samaly Trading', ParagraphStyle('CoverBrand', parent=styles['Title'], textColor=green)),
+                        Paragraph(escape(str(options.get('title') or 'Catalogue produits')), center), Spacer(1, 8*mm)]
+        for value in (settings.get('shop_name'), settings.get('address'), settings.get('phone')):
+            if value:
+                cover_story.append(Paragraph(escape(str(value)).replace('\n','<br/>'), center))
+        cover_story += [Spacer(1, 8*mm), Paragraph(f'{len(products)} produits sélectionnés', center)]
+        if not show_prices:
+            cover_story.append(Paragraph('Catalogue sans prix - Tarifs sur demande', center))
+        cover_story.append(PageBreak())
+        story = cover_story + story
     number = whatsapp_number(options.get('whatsapp', ''))
     link = order_link(number)
     if options.get('valid_until'):
         validity = datetime.fromisoformat(str(options['valid_until'])).strftime('%d/%m/%Y')
-        story.append(Paragraph(f'Prix valables jusqu’au {validity}', styles['Normal']))
+        label = 'Prix valables' if show_prices else 'Catalogue valable'
+        story.append(Paragraph(f'{label} jusqu’au {validity}', styles['Normal']))
     if link:
         qr = QrCodeWidget(link)
         x1, y1, x2, y2 = qr.getBounds()
@@ -133,6 +150,14 @@ def make_catalog_pdf(products: pd.DataFrame, settings: dict | None = None, optio
         banner = Table([[contact, drawing]], colWidths=[150*mm, 32*mm])
         banner.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'MIDDLE')]))
         story.extend([banner, Spacer(1, 4*mm)])
+    delivery = []
+    for key, label in [('delivery_zones','Zones'), ('delivery_fees','Frais'), ('delivery_times','Délais')]:
+        value = str(options.get(key, '') or '').strip()
+        if value:
+            delivery.append(f'<b>{label} :</b> {escape(value).replace(chr(10), "<br/>")}')
+    if delivery:
+        from reportlab.platypus import KeepTogether
+        story.append(KeepTogether([Paragraph('Conditions de livraison', styles['Heading2']), Paragraph('<br/>'.join(delivery), styles['Normal']), Spacer(1, 4*mm)]))
     from reportlab.platypus import Flowable
     from reportlab.lib.utils import ImageReader
 
@@ -188,7 +213,12 @@ def make_catalog_pdf(products: pd.DataFrame, settings: dict | None = None, optio
         if pd.notna(r.get('Promo')):
             price = f"<strike>{price}</strike><br/><font color='#B43D22'>PROMO : {_money(r['Promo'])}</font>"
         ref = escape(r['Reference'])
-        text=f"<b>{escape(str(r.get('Produit','')))}</b><br/>Réf. : {ref}<br/><font color='#12372A' size='13'><b>{price}</b></font>"
+        text=f"<b>{escape(str(r.get('Produit','')))}</b><br/>Réf. : {ref}"
+        for field, label in [('Description',''), ('Tailles','Tailles : '), ('Couleurs','Couleurs : ')]:
+            if r[field]:
+                text += '<br/>' + label + escape(r[field]).replace('\n', '<br/>')
+        if show_prices:
+            text += f"<br/><font color='#12372A' size='13'><b>{price}</b></font>"
         if link:
             item_link = order_link(number, f"Bonjour, je souhaite commander {r['Produit']} (réf. {r['Reference']}). Quantité : ")
             text += f'<br/><link href="{escape(item_link, quote=True)}" color="#12372A"><u>Commander sur WhatsApp</u></link>'
