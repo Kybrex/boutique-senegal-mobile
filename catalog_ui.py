@@ -14,9 +14,12 @@ def catalog_panel(products, settings, user=None):
     if st.session_state.pop('catalog_saved_notice', False):
         st.success('Catalogue enregistré. Vous pourrez le recharger lors d’une prochaine connexion.')
     if user and user.get('role') == 'admin':
-        from catalog_library import list_catalogs, restore_catalog
+        from catalog_library import list_catalogs, restore_catalog, CatalogDataError
         try:
             saved = list_catalogs(user)
+        except CatalogDataError as exc:
+            saved = exc.recovered
+            st.warning(str(exc))
         except Exception:
             saved = {}
             st.warning('Les catalogues enregistrés sont momentanément indisponibles.')
