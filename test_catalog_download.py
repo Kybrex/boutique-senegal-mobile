@@ -10,18 +10,20 @@ import pandas as pd
 class Screen:
     def __init__(self):
         self.session_state = {}
-        self.column_config = SimpleNamespace(NumberColumn=lambda *a, **kw: None)
+        self.column_config = SimpleNamespace(NumberColumn=lambda *a, **kw: None, TextColumn=lambda *a, **kw: None)
         self.clicked = False
         self.phone = '771234567'
         self.downloads = []
         self.errors = []
     def caption(self, *a): pass
+    def subheader(self, *a): pass
     def info(self, *a): pass
     def success(self, *a): pass
     def error(self, message): self.errors.append(message)
     def checkbox(self, *a, **kw): return True
     def multiselect(self, *a, **kw): return kw['default']
-    def text_input(self, *a, **kw): return self.phone
+    def text_input(self, *a, **kw): return self.phone if kw.get('key') == 'catalog_whatsapp' else kw.get('value','')
+    def text_area(self, *a, **kw): return ''
     def date_input(self, *a, **kw): return kw['value']
     def data_editor(self, data, **kw): return data
     def button(self, *a, **kw):
