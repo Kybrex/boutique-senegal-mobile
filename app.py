@@ -52,6 +52,8 @@ if page == "Tableau de bord":
     else: st.success("Aucune alerte de stock.")
 
 elif page == "Produits et stock":
+    from product_management_ui import deletion_panel
+    deletion_panel(user, db.products())
     suppliers = db.suppliers(); supplier_map = {"Aucun": None} | dict(zip(suppliers.Fournisseur, suppliers.id))
     st.subheader("Ajouter un produit")
     with st.form("product_form", clear_on_submit=True):
