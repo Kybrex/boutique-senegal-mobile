@@ -72,6 +72,14 @@ class CloudLifecycleTests(unittest.TestCase):
     def test_cloud_product_list_has_all_pages(self):
         self.data['products']=[{'id':i,'name':f'Article {i}','stock':1,'sale_price':200,'purchase_price':100,'min_stock':0} for i in range(1,1201)]
         self.assertEqual(len(life.cloud.products()),1200)
+
+    def test_complete_lists_use_cloud_without_sqlite_fallback(self):
+        self.data['products'][0].update(purchase_price=100,sale_price=200,min_stock=0)
+        life.set_archived(ADMIN,1,True,'Fin de gamme')
+        with patch.object(life.db,'query',side_effect=AssertionError('No local data in cloud mode')), \
+             patch.object(life.db,'products',side_effect=AssertionError('No signature dependency')):
+            self.assertEqual(len(life.all_products()),1)
+            self.assertEqual(int(life.all_store_inventory(1).iloc[0].Stock),10)
     def test_atomic_sale_refuses_archived_before_rpc(self):
         life.set_archived(ADMIN,1,True,'Fin de gamme')
         with patch.object(life.cloud,'client') as client:
