@@ -405,6 +405,8 @@ elif page == "Caisse":
 elif page == "Produits":
     inventory = db.products()
     st.header("Produits et stock", icon=":material/inventory_2:")
+    from product_management_ui import deletion_panel
+    deletion_panel(user, inventory)
     suppliers = db.suppliers()
     supplier_map = {"Sans fournisseur": None} | dict(zip(suppliers.Fournisseur, suppliers.id))
     with st.expander("Ajouter un produit", icon=":material/add_circle:", expanded=inventory.empty):
@@ -460,7 +462,7 @@ elif page == "Produits":
                     except ValueError as error: st.error(str(error))
         with st.expander("Historique des modifications de stock et de prix"):
             history = db.audit_logs()
-            st.dataframe(history[history.Action.isin(["STOCK_MODIFIE", "PRIX_MODIFIES", "INVENTAIRE"])], hide_index=True, width="stretch")
+            st.dataframe(history[history.Action.isin(["STOCK_MODIFIE", "PRIX_MODIFIES", "INVENTAIRE", "PRODUIT_SUPPRIME"])], hide_index=True, width="stretch")
         if db.v2_ready():
             with st.expander("Code-barres et photo du produit", icon=":material/add_a_photo:"):
                 detail_name = st.selectbox("Produit à identifier", inventory.Produit.tolist(), key="detail_product")

@@ -99,7 +99,13 @@ def authenticate(username: str, password: str) -> dict | None:
     if users.empty or not valid_password(password, users.iloc[0].password_hash): return None
     return users.drop(columns="password_hash").iloc[0].to_dict()
 def add_product(name: str, category: str, purchase: float, sale: float, stock: int, minimum: int, supplier_id: int | None) -> None:
-    execute("INSERT INTO products(name,category,purchase_price,sale_price,stock,min_stock,supplier_id) VALUES(?,?,?,?,?,?,?)", (name.strip(), category.strip(), purchase, sale, stock, minimum, supplier_id))
+    # Never reuse a deleted reference still present in saved catalogues/carts.
+    execute("""INSERT INTO products(id,name,category,purchase_price,sale_price,stock,min_stock,supplier_id)
+        SELECT COALESCE(MAX(id),0)+1,?,?,?,?,?,?,? FROM (
+            SELECT id FROM products UNION ALL
+            SELECT CAST(details AS INTEGER) FROM activity_logs
+            WHERE action='BOUTIQUE_CONFIG:product_id_high_watermark'
+        )""", (name.strip(), category.strip(), purchase, sale, stock, minimum, supplier_id))
 def update_product_prices(product_id: int, purchase: float, sale: float) -> None:
     if purchase < 0 or sale <= 0: raise ValueError("Prix invalides.")
     with connection() as conn:
