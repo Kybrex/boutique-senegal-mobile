@@ -271,4 +271,3 @@ def sync_offline_sales(bundle,seller_id,user_id):
             done+=1
         except Exception as error: errors.append(f"{offline_id}: {error}")
     return {"imported":done,"skipped":skipped,"errors":errors}
-

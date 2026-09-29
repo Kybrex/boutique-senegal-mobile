@@ -70,4 +70,3 @@ précède la RPC de vente cloud ; elle n’est pas un verrou serveur entre sessi
 
 Validation : tests SQLite isolés, adaptateur Supabase simulé, tests Streamlit des
 formulaires et tests de non-régression. Les tests ne modifient aucune donnée réelle.
-

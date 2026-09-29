@@ -129,4 +129,3 @@ def management_panel(user):
             except Exception:
                 logging.getLogger(__name__).exception('Product history failed')
                 st.error('L’historique est momentanément indisponible. Réessayez après actualisation.')
-

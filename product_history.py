@@ -58,4 +58,3 @@ def history(product_id):
     frame = pd.DataFrame(result)
     frame['_sort'] = pd.to_datetime(frame.Date,utc=True,errors='coerce',format='mixed')
     return frame.sort_values('_sort',ascending=False,na_position='last',kind='stable').drop(columns='_sort').reset_index(drop=True)
-

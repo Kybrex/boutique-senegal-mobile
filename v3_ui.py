@@ -225,4 +225,3 @@ def credit_reminder_link(row) -> str:
     digits="".join(c for c in str(row.Telephone) if c.isdigit()); status=str(row.Statut).replace("_"," ").lower()
     message=quote(f"Bonjour {row.Client}, rappel Boutique Senegal : le solde du ticket #{int(row.Ticket)} est de {fcfa(row.Reste)}. Échéance : {row.Echeance} ({status}). Merci.")
     return f"https://wa.me/{digits}?text={message}" if digits else f"https://wa.me/?text={message}"
-

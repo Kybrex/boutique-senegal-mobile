@@ -155,4 +155,3 @@ else:
         if st.form_submit_button("Enregistrer la depense") and label and amount > 0: db.add_expense(label, amount); st.rerun()
     st.subheader("Ventes"); st.dataframe(sales, hide_index=True)
     st.subheader("Depenses"); st.dataframe(spend, hide_index=True)
-

@@ -457,4 +457,3 @@ def add_product(name, category, purchase, sale, stock, minimum, supplier_id):
     from product_lifecycle import validate_name
     name = validate_name(name)
     return _add_product(name, category, purchase, sale, stock, minimum, supplier_id)
-

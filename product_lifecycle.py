@@ -230,4 +230,3 @@ def change_stock(user, product_id, mode, amount, expected_stock, reason, note=''
         conn.execute('UPDATE products SET stock=? WHERE id=?',(target,int(product_id)))
         conn.execute('INSERT INTO store_stock(store_id,product_id,stock) VALUES(1,?,?) ON CONFLICT(store_id,product_id) DO UPDATE SET stock=excluded.stock',(int(product_id),target))
         write_event(product_id,'movement',payload,int(user['id']),conn)
-

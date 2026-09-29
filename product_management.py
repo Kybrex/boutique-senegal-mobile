@@ -92,4 +92,3 @@ def _check_stores(stocks, main_id):
 
 def _details(product, reason):
     return f"{product['name']} (#{product['id']}), stock supprimé : {product['stock']}; {reason}"
-

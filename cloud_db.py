@@ -435,4 +435,3 @@ def restore_backup(bundle):
     client().rpc("sync_boutique_sequences").execute()
     restore_indexes(bundle)
     return {"restored":restored,"skipped":skipped}
-
