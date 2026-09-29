@@ -54,29 +54,14 @@ if page == "Tableau de bord":
 elif page == "Produits et stock":
     from product_management_ui import deletion_panel
     deletion_panel(user, db.products())
-    suppliers = db.suppliers(); supplier_map = {"Aucun": None} | dict(zip(suppliers.Fournisseur, suppliers.id))
-    st.subheader("Ajouter un produit")
-    with st.form("product_form", clear_on_submit=True):
-        name = st.text_input("Nom du produit"); category = st.text_input("Categorie"); supplier = st.selectbox("Fournisseur", list(supplier_map))
-        a, b, c, d = st.columns(4); purchase = a.number_input("Prix d'achat (FCFA)", min_value=0.0, step=100.0); sale = b.number_input("Prix de vente (FCFA)", min_value=1.0, step=100.0); stock = c.number_input("Stock initial", min_value=0, step=1); minimum = d.number_input("Alerte minimum", min_value=0, step=1)
-        if st.form_submit_button("Enregistrer le produit"):
-            try: db.add_product(name, category, purchase, sale, stock, minimum, supplier_map[supplier]); st.success("Produit ajoute.")
-            except Exception: st.error("Le nom du produit est obligatoire et doit etre unique.")
-    inventory = db.products(); st.subheader("Inventaire"); st.dataframe(inventory, hide_index=True, column_config={"Achat": st.column_config.NumberColumn(format="%.0f FCFA"), "Vente": st.column_config.NumberColumn(format="%.0f FCFA")})
-    if not inventory.empty:
-        st.subheader("Modifier manuellement le stock")
-        product_name = st.selectbox("Produit a modifier", inventory.Produit.tolist()); record = inventory.loc[inventory.Produit == product_name].iloc[0]
-        change_mode = st.segmented_control("Type de modification", ["Definir la quantite exacte", "Ajouter", "Retirer"], default="Definir la quantite exacte")
-        if change_mode == "Definir la quantite exacte":
-            new_quantity = st.number_input("Nouvelle quantite exacte", min_value=0, value=int(record.Stock), step=1)
-            if st.button("Enregistrer la quantite", type="primary"):
-                db.set_stock(int(record.id), int(new_quantity)); st.success("Stock mis a jour."); st.rerun()
-        else:
-            amount = st.number_input("Quantite a ajouter" if change_mode == "Ajouter" else "Quantite a retirer", min_value=1, value=1, step=1)
-            if st.button("Confirmer la modification", type="primary"):
-                try:
-                    db.adjust_stock(int(record.id), int(amount) if change_mode == "Ajouter" else -int(amount)); st.success("Stock mis a jour."); st.rerun()
-                except ValueError as error: st.error(str(error))
+    import product_lifecycle_ui as product_ui
+    product_ui.notice()
+    product_ui.creation_panel(user, db.suppliers())
+    product_ui.management_panel(user)
+    inventory = db.products()
+    st.subheader("Inventaire")
+    st.dataframe(inventory, hide_index=True)
+    product_ui.stock_panel(user, inventory)
 
 elif page == "Clients et fournisseurs":
     client_tab, supplier_tab = st.tabs(["Clients", "Fournisseurs"])

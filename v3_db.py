@@ -35,6 +35,8 @@ def v3_error() -> str:
 
 
 def create_document(document_type, client_id, valid_until, notes, items, user_id):
+    from product_lifecycle import require_active
+    require_active([item['product_id'] for item in items])
     if not items: raise ValueError("Ajoutez au moins un produit.")
     total=sum(int(item["quantity"])*float(item["unit_price"]) for item in items)
     payload={"document_type":document_type,"client_id":client_id,"valid_until":valid_until.isoformat() if valid_until else None,"notes":notes.strip(),"total":total,"created_by":user_id}
@@ -82,6 +84,8 @@ def set_document_status(document_id,status):
 
 
 def create_purchase_order(supplier_id, expected_date, notes, items, user_id):
+    from product_lifecycle import require_active
+    require_active([item['product_id'] for item in items])
     if not items: raise ValueError("Ajoutez au moins un produit.")
     total=sum(int(i["quantity"])*float(i["unit_cost"]) for i in items); payload={"supplier_id":supplier_id,"expected_date":expected_date.isoformat() if expected_date else None,"notes":notes.strip(),"total":total,"created_by":user_id}
     if _cloud():
@@ -119,6 +123,8 @@ def receive_purchase_order_item(order_id,item_id,quantity):
     status="REÇUE" if remaining==0 else "PARTIELLE"
     if _cloud(): cloud._table("purchase_orders").update({"status":status}).eq("id",order_id).execute()
     else: db.execute("UPDATE purchase_orders SET status=? WHERE id=?",(status,order_id))
+    from product_lifecycle import _audit_after_update
+    return _audit_after_update(int(row.product_id),'receipt',{'quantity':int(quantity),'item_id':int(item_id),'order_id':int(order_id)},None)
 
 
 def add_supplier_payment(order_id,amount,method,user_id):

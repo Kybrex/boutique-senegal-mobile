@@ -91,12 +91,16 @@ class LocalDeletionTests(unittest.TestCase):
 class FakeTable:
     def __init__(self, backend, name):
         self.backend, self.name, self.filters, self.deleting = backend, name, {}, False
+        self.slice = None
     def select(self, *args): return self
     def eq(self, key, value): self.filters[key] = value; return self
     def limit(self, *args): return self
+    def order(self, *args, **kwargs): return self
+    def range(self, start, end): self.slice = (start,end); return self
     def delete(self): self.deleting = True; return self
     def execute(self):
         rows = [r for r in self.backend.rows.get(self.name, []) if all(r.get(k) == v for k,v in self.filters.items())]
+        if self.slice is not None: rows = rows[self.slice[0]:self.slice[1]+1]
         if self.deleting:
             if self.backend.conflict:
                 error = RuntimeError('FK'); error.code = '23503'; raise error

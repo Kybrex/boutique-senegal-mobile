@@ -25,7 +25,14 @@ def delete_product(user, product_id, expected_stock, reason):
     if not reason or len(reason) > 200:
         raise ValueError('Indiquez un motif de 1 à 200 caractères.')
     product_id = int(product_id)
+    from product_lifecycle import rows, EVENT_PREFIX
+    import json
+    def check_stock_history(conn=None):
+        for event in rows('activity_logs', {'action':EVENT_PREFIX+str(product_id)},conn=conn):
+            if json.loads(event['details']).get('kind') in {'movement','purchase','receipt'}:
+                raise ValueError('Ce produit possède un historique de stock. Archivez-le pour le masquer sans perdre cet historique.')
     if cloud.enabled():
+        check_stock_history()
         product = cloud._one('products', id=product_id)
         _check_product(product, expected_stock)
         for table, label in LINKED_TABLES:
@@ -53,6 +60,7 @@ def delete_product(user, product_id, expected_stock, reason):
 
     with closing(db.connection()) as conn, conn:
         conn.execute('BEGIN IMMEDIATE')
+        check_stock_history(conn)
         product = conn.execute('SELECT * FROM products WHERE id=?', (product_id,)).fetchone()
         _check_product(product, expected_stock)
         for table, label in LINKED_TABLES:
