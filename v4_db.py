@@ -129,6 +129,8 @@ def verify_admin_pin(pin: str, user_id: int | None = None, action: str = "APPROB
 def atomic_save_sale(cart, seller_id, client_id, paid, method, discount, due_date=None, store_id=1):
     """Enregistre la vente et le stock dans une seule transaction."""
     if not cart: raise ValueError("Le ticket est vide.")
+    from product_lifecycle import require_active
+    require_active([item['id'] for item in cart])
     if _cloud():
         params={"p_seller_id":seller_id,"p_client_id":client_id,"p_paid":float(paid),"p_method":method,"p_discount":float(discount),"p_due_date":due_date.isoformat() if hasattr(due_date,"isoformat") else due_date,"p_store_id":int(store_id),"p_items":[{"product_id":int(i["id"]),"variant_id":i.get("variant_id"),"quantity":int(i["quantity"]),"unit_price":float(i["sale_price"])} for i in cart]}
         result=cloud.client().rpc("save_sale_atomic",params).execute().data
@@ -136,6 +138,8 @@ def atomic_save_sale(cart, seller_id, client_id, paid, method, discount, due_dat
         if not isinstance(data,dict): raise ValueError("Réponse de vente Supabase invalide.")
         return int(data["sale_id"]),float(data["gross"]),float(data["total"])
     with db.connection() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        require_active([item['id'] for item in cart], conn)
         product_rows={}; variant_rows={}; gross=0.0
         for item in cart:
             product=conn.execute("SELECT * FROM products WHERE id=?",(item["id"],)).fetchone(); qty=int(item["quantity"])
@@ -186,6 +190,11 @@ def import_rows(kind: str, rows: list[dict]) -> dict:
         if kind=="products":
             row.update({"name":name,"category":str(row.get("category","") or ""),"purchase_price":float(row.get("purchase_price",0) or 0),"sale_price":float(row.get("sale_price",0) or 0),"stock":int(float(row.get("stock",0) or 0)),"min_stock":int(float(row.get("min_stock",0) or 0)),"barcode":str(row.get("barcode","") or "").strip() or None})
             if row["sale_price"]<=0: ignored+=1; continue
+            from product_lifecycle import duplicate_candidates, archived_ids
+            exact = next((r for r in duplicate_candidates(name) if r['exact']), None)
+            if exact and (exact['name'] != name or exact['id'] in archived_ids()):
+                ignored += 1
+                continue
         else: row.update({"name":name,"phone":str(row.get("phone","") or ""),"email":str(row.get("email","") or ""),"address":str(row.get("address","") or "")})
         if _cloud():
             existing=_one(kind,name=name)
@@ -194,8 +203,13 @@ def import_rows(kind: str, rows: list[dict]) -> dict:
         else:
             existing=db.query(f"SELECT id FROM {kind} WHERE name=?",(name,))
             if existing.empty:
-                columns=list(row)
-                with db.connection() as conn: cursor=conn.execute(f"INSERT INTO {kind}({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",tuple(row[c] for c in columns)); identifier=int(cursor.lastrowid); conn.commit()
+                if kind == 'products':
+                    db.add_product(name,row['category'],row['purchase_price'],row['sale_price'],row['stock'],row['min_stock'],None)
+                    identifier=int(db.query('SELECT id FROM products WHERE name=?',(name,)).iloc[0].id)
+                    db.update_product_details(identifier,row.get('barcode') or '', '')
+                else:
+                    columns=list(row)
+                    with db.connection() as conn: cursor=conn.execute(f"INSERT INTO {kind}({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",tuple(row[c] for c in columns)); identifier=int(cursor.lastrowid); conn.commit()
                 inserted+=1
             else:
                 identifier=int(existing.iloc[0].id); columns=[c for c in row if c!="name"]; db.execute(f"UPDATE {kind} SET {','.join(c+'=?' for c in columns)} WHERE id=?",tuple(row[c] for c in columns)+(identifier,)); updated+=1
@@ -311,8 +325,9 @@ def owner_dashboard(start: date, end: date) -> dict:
     totals={}
     for r in raw:
         sid=int(r.get("store_id") or 1); item=totals.setdefault(sid,{"Ventes":0.0,"Encaisse":0.0,"Creances":0.0,"Commissions":0.0,"Tickets":0}); item["Ventes"]+=float(r.get("total") or 0); item["Encaisse"]+=float(r.get("paid") or 0); item["Creances"]+=max(0,float(r.get("total") or 0)-float(r.get("paid") or 0)); item["Commissions"]+=float(r.get("commission_amount") or 0); item["Tickets"]+=1
-    product_costs={int(r.id):float(r.Achat or 0) for _,r in db.products().iterrows()}
+    product_costs={int(r.id):float(r.Achat or 0) for _,r in db.products(include_archived=True).iterrows()}
     for _,store in stores.iterrows():
-        sid=int(store.id); inventory=db.store_inventory(sid); item=totals.setdefault(sid,{"Ventes":0.0,"Encaisse":0.0,"Creances":0.0,"Commissions":0.0,"Tickets":0}); item["Unites_stock"]=int(inventory.Stock.sum()) if not inventory.empty else 0; item["Valeur_stock"]=sum(int(r.Stock)*product_costs.get(int(r.id),0) for _,r in inventory.iterrows()) if not inventory.empty else 0
+        sid=int(store.id); inventory=db.store_inventory(sid,include_archived=True); item=totals.setdefault(sid,{"Ventes":0.0,"Encaisse":0.0,"Creances":0.0,"Commissions":0.0,"Tickets":0}); item["Unites_stock"]=int(inventory.Stock.sum()) if not inventory.empty else 0; item["Valeur_stock"]=sum(int(r.Stock)*product_costs.get(int(r.id),0) for _,r in inventory.iterrows()) if not inventory.empty else 0
     by_store=_frame([{"Boutique":store_names.get(sid,f"Boutique #{sid}"),**values} for sid,values in totals.items()],["Boutique","Tickets","Ventes","Encaisse","Creances","Commissions","Unites_stock","Valeur_stock"])
     return {"sales":float(sales.Total.sum()) if not sales.empty else 0.0,"tickets":len(sales),"debt":float(db.dashboard(start,end)["debt"]),"stores":by_store,"commissions":commission_report(start,end),"forecast":reorder_forecast()}
+

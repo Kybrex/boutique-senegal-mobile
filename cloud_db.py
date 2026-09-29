@@ -89,7 +89,12 @@ def delete_supplier(supplier_id):
 
 
 def products() -> pd.DataFrame:
-    rows = _data(_table("products").select("*,suppliers(name)").order("name").execute())
+    rows, offset = [], 0
+    while True:
+        batch = _data(_table("products").select("*,suppliers(name)").order("name").order("id").range(offset,offset+499).execute())
+        rows.extend(batch)
+        if not batch: break
+        offset += len(batch)
     return _frame([{ "id": r["id"], "Produit": r["name"], "Categorie": r.get("category", ""), "Achat": r["purchase_price"], "Vente": r["sale_price"], "Stock": r["stock"], "Minimum": r["min_stock"], "Fournisseur": (r.get("suppliers") or {}).get("name", ""), "Code_barres": r.get("barcode", "") or "", "Photo": r.get("photo_url", "") or "" } for r in rows], ["id", "Produit", "Categorie", "Achat", "Vente", "Stock", "Minimum", "Fournisseur", "Code_barres", "Photo"])
 def update_product_prices(product_id, purchase, sale):
     if purchase < 0 or sale <= 0: raise ValueError("Prix invalides.")
@@ -146,6 +151,8 @@ def register_purchase(product_id, quantity, unit_cost, supplier_name=""):
     if supplier_name:
         label += f" - {supplier_name}"
     add_expense(label, float(quantity) * float(unit_cost))
+    from product_lifecycle import _audit_after_update
+    return _audit_after_update(product_id,'purchase',{'quantity':int(quantity),'supplier':supplier_name},None)
 
 
 def client_history(client_id):
@@ -428,3 +435,4 @@ def restore_backup(bundle):
     client().rpc("sync_boutique_sequences").execute()
     restore_indexes(bundle)
     return {"restored":restored,"skipped":skipped}
+

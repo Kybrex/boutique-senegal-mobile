@@ -404,50 +404,17 @@ elif page == "Caisse":
 
 elif page == "Produits":
     inventory = db.products()
-    st.header("Produits et stock", icon=":material/inventory_2:")
+    st.header(":material/inventory_2: Produits et stock")
     from product_management_ui import deletion_panel
     deletion_panel(user, inventory)
-    suppliers = db.suppliers()
-    supplier_map = {"Sans fournisseur": None} | dict(zip(suppliers.Fournisseur, suppliers.id))
-    with st.expander("Ajouter un produit", icon=":material/add_circle:", expanded=inventory.empty):
-        with st.form("mobile_product"):
-            name = st.text_input("Nom du produit")
-            category = st.text_input("Catégorie", placeholder="Ex. Boissons")
-            purchase = st.number_input("Prix d'achat (FCFA)", min_value=0.0, step=100.0)
-            sale = st.number_input("Prix de vente (FCFA)", min_value=0.0, step=100.0)
-            initial_stock = st.number_input("Quantité initiale", min_value=0, step=1)
-            minimum = st.number_input("Seuil d'alerte", min_value=0, step=1)
-            supplier_name = st.selectbox("Fournisseur", list(supplier_map))
-            if st.form_submit_button("Ajouter le produit", type="primary", icon=":material/add:"):
-                if not name.strip():
-                    st.error("Le nom du produit est obligatoire.")
-                elif sale <= 0:
-                    st.error("Le prix de vente doit être supérieur à zéro.")
-                else:
-                    try:
-                        db.add_product(name, category, purchase, sale, int(initial_stock), int(minimum), supplier_map[supplier_name])
-                        st.success("Produit ajouté.")
-                        st.rerun()
-                    except Exception:
-                        st.error("Ce produit existe déjà. Choisissez un autre nom.")
+    import product_lifecycle_ui as product_ui
+    product_ui.notice()
+    product_ui.creation_panel(user, db.suppliers())
+    product_ui.management_panel(user)
     v3_ui.product_list_download(inventory)
     st.dataframe(inventory, hide_index=True, column_config={"Achat": st.column_config.NumberColumn(format="%.0f FCFA"), "Vente": st.column_config.NumberColumn(format="%.0f FCFA"), "Photo":st.column_config.ImageColumn("Photo")})
     if not inventory.empty:
-        with st.container(border=True):
-            product_name = st.selectbox("Produit à modifier", inventory.Produit.tolist())
-            record = inventory.loc[inventory.Produit == product_name].iloc[0]
-            mode = st.segmented_control("Modification", ["Définir", "Ajouter", "Retirer"], default="Définir")
-            amount = st.number_input("Quantité", min_value=0 if mode == "Définir" else 1, value=int(record.Stock) if mode == "Définir" else 1, step=1)
-            if st.button("Enregistrer le stock", type="primary", icon=":material/save:"):
-                try:
-                    if mode == "Définir": db.set_stock(int(record.id), int(amount))
-                    else: db.adjust_stock(int(record.id), int(amount) if mode == "Ajouter" else -int(amount))
-                    new_stock = int(amount) if mode == "Définir" else int(record.Stock) + (int(amount) if mode == "Ajouter" else -int(amount))
-                    db.log_action(int(user["id"]), "STOCK_MODIFIE", f"{record.Produit} (#{int(record.id)}): {int(record.Stock)} → {new_stock} ({mode})")
-                    st.success("Stock mis à jour.")
-                    st.rerun()
-                except ValueError as error:
-                    st.error(str(error))
+        product_ui.stock_panel(user, inventory)
         with st.expander("Modifier les prix"):
             price_name = st.selectbox("Produit à repricer", inventory.Produit.tolist())
             price_row = inventory.loc[inventory.Produit == price_name].iloc[0]
@@ -499,8 +466,10 @@ elif page == "Achats":
             supplier_name = st.selectbox("Fournisseur", supplier_names)
             if st.form_submit_button("Enregistrer la livraison", type="primary", icon=":material/add_business:"):
                 try:
-                    db.register_purchase(int(product_map[product_name]["id"]), int(quantity), float(unit_cost), "" if supplier_name == "Sans fournisseur" else supplier_name)
-                    st.success("Achat enregistré, stock augmenté et dépense ajoutée."); st.rerun()
+                    warning = db.register_purchase(int(product_map[product_name]["id"]), int(quantity), float(unit_cost), "" if supplier_name == "Sans fournisseur" else supplier_name)
+                    st.success("Achat enregistré, stock augmenté et dépense ajoutée.")
+                    if warning: st.warning(warning)
+                    else: st.rerun()
                 except ValueError as error: st.error(str(error))
         st.dataframe(db.products(), hide_index=True)
 
@@ -815,3 +784,4 @@ elif page == "Propriétaire":
 
 elif page == "Stock":
     v3_ui.stock_readonly_page()
+

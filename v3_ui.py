@@ -102,7 +102,12 @@ def purchase_orders_page(user):
             imap={f"{r.Produit} - reste {int(r.Restante)}":r for _,r in pending.iterrows()}
             with st.form("receive_order"):
                 ilabel=st.selectbox("Article reçu",list(imap)); item=imap[ilabel]; qty=st.number_input("Quantité reçue",min_value=1,max_value=int(item.Restante),step=1)
-                if st.form_submit_button("Réceptionner et augmenter le stock",type="primary"): v3.receive_purchase_order_item(oid,int(item.id),int(qty)); db.log_action(int(user["id"]),"RECEPTION_COMMANDE",f"Commande #{oid} - {qty}"); st.success("Réception enregistrée."); st.rerun()
+                if st.form_submit_button("Réceptionner et augmenter le stock",type="primary"):
+                    warning = v3.receive_purchase_order_item(oid,int(item.id),int(qty))
+                    db.log_action(int(user["id"]),"RECEPTION_COMMANDE",f"Commande #{oid} - {qty}")
+                    st.success("Réception enregistrée.")
+                    if warning: st.warning(warning)
+                    else: st.rerun()
         order=orders[orders.id==oid].iloc[0]
         pdf_items=items.rename(columns={"Commande":"Quantite","Cout":"Prix"}); order_pdf=make_business_document_pdf({"id":oid,"Type":"BON_COMMANDE","Client":order.Fournisseur,"Total":order.Total,"Date":order.Date},pdf_items,dict(db.get_settings(), **features.invoice_settings()))
         st.download_button("Télécharger le bon de commande PDF",order_pdf,file_name=f"bon_commande_{oid}.pdf",mime="application/pdf",icon=":material/picture_as_pdf:")
@@ -220,3 +225,4 @@ def credit_reminder_link(row) -> str:
     digits="".join(c for c in str(row.Telephone) if c.isdigit()); status=str(row.Statut).replace("_"," ").lower()
     message=quote(f"Bonjour {row.Client}, rappel Boutique Senegal : le solde du ticket #{int(row.Ticket)} est de {fcfa(row.Reste)}. Échéance : {row.Echeance} ({status}). Merci.")
     return f"https://wa.me/{digits}?text={message}" if digits else f"https://wa.me/?text={message}"
+

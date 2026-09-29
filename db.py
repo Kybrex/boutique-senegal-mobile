@@ -149,6 +149,9 @@ def delete_supplier(supplier_id: int) -> None:
 def save_sale(cart: list[dict], seller_id: int, client_id: int | None, paid: float, method: str, discount: float, due_date=None) -> tuple[int, float, float]:
     gross = sum(item["quantity"] * item["sale_price"] for item in cart); discount = max(0, min(discount, gross)); total = gross-discount
     with connection() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        from product_lifecycle import require_active
+        require_active([item['id'] for item in cart],conn)
         due_value = due_date.isoformat() if hasattr(due_date, "isoformat") else due_date
         cursor = conn.execute("INSERT INTO sales(seller_id,client_id,total,discount,paid,payment_method,due_date) VALUES(?,?,?,?,?,?,?)", (seller_id, client_id, total, discount, paid, method, due_value)); sale_id = cursor.lastrowid
         for item in cart:
@@ -225,7 +228,10 @@ def register_purchase(product_id: int, quantity: int, unit_cost: float, supplier
         current = conn.execute("SELECT stock FROM products WHERE id=?", (product_id,)).fetchone()["stock"]
         conn.execute("INSERT INTO store_stock(store_id,product_id,stock) VALUES(1,?,?) ON CONFLICT(store_id,product_id) DO UPDATE SET stock=excluded.stock", (product_id,current))
         label = f"Achat stock - {product['name']} x{quantity}" + (f" - {supplier_name}" if supplier_name else "")
-        conn.execute("INSERT INTO expenses(label,amount) VALUES(?,?)", (label, quantity*unit_cost)); conn.commit()
+        conn.execute("INSERT INTO expenses(label,amount) VALUES(?,?)", (label, quantity*unit_cost))
+        from product_lifecycle import write_event
+        write_event(product_id,'purchase',{'quantity':int(quantity),'supplier':supplier_name},conn=conn)
+        conn.commit()
 def client_history(client_id: int) -> pd.DataFrame:
     return query("SELECT id AS Ticket,created_at AS Date,total AS Total,paid AS Paye,MAX(total-paid,0) AS Reste,payment_method AS Paiement,COALESCE(due_date,'') AS Echeance FROM sales WHERE client_id=? ORDER BY created_at DESC", (client_id,))
 def product_performance(start: date, end: date) -> pd.DataFrame:
@@ -401,3 +407,54 @@ try:
         backup_bundle = _cloud.backup_bundle; restore_backup = _cloud.restore_backup
 except Exception:
     pass
+
+
+# Operational lists hide archived products. Historical joins and backups keep
+# the original product rows so sales, returns and documents remain readable.
+_all_products = products
+_inventory_snapshot = inventory_snapshot
+_store_inventory = store_inventory
+_barcode_product = find_product_by_barcode
+_save_sale = save_sale
+_add_product = add_product
+
+
+def products(include_archived=False):
+    from product_lifecycle import active_frame
+    frame = _all_products()
+    return frame if include_archived else active_frame(frame)
+
+
+def inventory_snapshot():
+    from product_lifecycle import active_frame
+    return active_frame(_inventory_snapshot())
+
+
+def store_inventory(store_id, include_archived=False):
+    from product_lifecycle import active_frame
+    frame = _store_inventory(store_id)
+    return frame if include_archived else active_frame(frame)
+
+
+def low_stock():
+    frame = products()
+    return frame.loc[frame.Stock <= frame.Minimum, ['Produit','Stock','Minimum']].copy()
+
+
+def find_product_by_barcode(barcode):
+    from product_lifecycle import archived_ids
+    row = _barcode_product(barcode)
+    return None if row is not None and int(row['id']) in archived_ids() else row
+
+
+def save_sale(cart, seller_id, client_id, paid, method, discount, due_date=None):
+    from product_lifecycle import require_active
+    require_active([item['id'] for item in cart])
+    return _save_sale(cart, seller_id, client_id, paid, method, discount, due_date)
+
+
+def add_product(name, category, purchase, sale, stock, minimum, supplier_id):
+    from product_lifecycle import validate_name
+    name = validate_name(name)
+    return _add_product(name, category, purchase, sale, stock, minimum, supplier_id)
+
