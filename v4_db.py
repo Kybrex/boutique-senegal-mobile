@@ -325,8 +325,9 @@ def owner_dashboard(start: date, end: date) -> dict:
     totals={}
     for r in raw:
         sid=int(r.get("store_id") or 1); item=totals.setdefault(sid,{"Ventes":0.0,"Encaisse":0.0,"Creances":0.0,"Commissions":0.0,"Tickets":0}); item["Ventes"]+=float(r.get("total") or 0); item["Encaisse"]+=float(r.get("paid") or 0); item["Creances"]+=max(0,float(r.get("total") or 0)-float(r.get("paid") or 0)); item["Commissions"]+=float(r.get("commission_amount") or 0); item["Tickets"]+=1
-    product_costs={int(r.id):float(r.Achat or 0) for _,r in db.products(include_archived=True).iterrows()}
+    from product_lifecycle import all_products, all_store_inventory
+    product_costs={int(r.id):float(r.Achat or 0) for _,r in all_products().iterrows()}
     for _,store in stores.iterrows():
-        sid=int(store.id); inventory=db.store_inventory(sid,include_archived=True); item=totals.setdefault(sid,{"Ventes":0.0,"Encaisse":0.0,"Creances":0.0,"Commissions":0.0,"Tickets":0}); item["Unites_stock"]=int(inventory.Stock.sum()) if not inventory.empty else 0; item["Valeur_stock"]=sum(int(r.Stock)*product_costs.get(int(r.id),0) for _,r in inventory.iterrows()) if not inventory.empty else 0
+        sid=int(store.id); inventory=all_store_inventory(sid); item=totals.setdefault(sid,{"Ventes":0.0,"Encaisse":0.0,"Creances":0.0,"Commissions":0.0,"Tickets":0}); item["Unites_stock"]=int(inventory.Stock.sum()) if not inventory.empty else 0; item["Valeur_stock"]=sum(int(r.Stock)*product_costs.get(int(r.id),0) for _,r in inventory.iterrows()) if not inventory.empty else 0
     by_store=_frame([{"Boutique":store_names.get(sid,f"Boutique #{sid}"),**values} for sid,values in totals.items()],["Boutique","Tickets","Ventes","Encaisse","Creances","Commissions","Unites_stock","Valeur_stock"])
     return {"sales":float(sales.Total.sum()) if not sales.empty else 0.0,"tickets":len(sales),"debt":float(db.dashboard(start,end)["debt"]),"stores":by_store,"commissions":commission_report(start,end),"forecast":reorder_forecast()}

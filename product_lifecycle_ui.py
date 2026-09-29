@@ -89,7 +89,7 @@ def stock_panel(user, inventory):
 
 def management_panel(user):
     if not user or user.get('role') != 'admin': return
-    all_products = db.products(include_archived=True)
+    all_products = lifecycle.all_products()
     if all_products.empty: return
     archived = lifecycle.archived_ids()
     entries = {int(r.id):r for _,r in all_products.iterrows()}

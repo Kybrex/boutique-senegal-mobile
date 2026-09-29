@@ -63,6 +63,13 @@ class LifecycleTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'archivé'): action()
         self.assertTrue(db.query('SELECT * FROM sales').empty)
 
+    def test_complete_lists_do_not_depend_on_public_db_signatures(self):
+        self.archive()
+        with patch.object(db,'products',side_effect=AssertionError('Do not use filtered products')), \
+             patch.object(db,'store_inventory',side_effect=AssertionError('Do not use filtered stock')):
+            self.assertEqual(len(life.all_products()),1)
+            self.assertEqual(int(life.all_store_inventory(1).iloc[0].Stock),10)
+
     def test_duplicate_normalization_and_archived(self):
         for name in [' CAFE   NOIR ','café-noir','Café noir']:
             with self.assertRaisesRegex(ValueError,'existe déjà'):

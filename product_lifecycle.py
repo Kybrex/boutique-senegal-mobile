@@ -15,6 +15,24 @@ EVENT_PREFIX = 'PRODUIT_EVT:'
 EXIT_REASONS = ('Casse', 'Perte', 'Don', 'Usage personnel', 'Correction d’inventaire', 'Autre')
 
 
+def all_products():
+    """Read every product without relying on a cached db.products signature.
+
+    Management and valuation need archived rows too. Read the selected backend
+    explicitly: falling back to db.products() could silently omit those rows.
+    """
+    if cloud.enabled():
+        return cloud.products()
+    return db.query("SELECT p.id,p.name AS Produit,p.category AS Categorie,p.purchase_price AS Achat,p.sale_price AS Vente,p.stock AS Stock,p.min_stock AS Minimum,COALESCE(s.name,'') AS Fournisseur,COALESCE(p.barcode,'') AS Code_barres,COALESCE(p.photo_url,'') AS Photo FROM products p LEFT JOIN suppliers s ON s.id=p.supplier_id ORDER BY p.name")
+
+
+def all_store_inventory(store_id):
+    """Preserve physical stock valuation, including archived products."""
+    if cloud.enabled():
+        return cloud.store_inventory(int(store_id))
+    return db.query("SELECT p.id,p.name AS Produit,COALESCE(ss.stock,CASE WHEN ?=1 THEN p.stock ELSE 0 END) AS Stock FROM products p LEFT JOIN store_stock ss ON ss.product_id=p.id AND ss.store_id=? ORDER BY p.name",(int(store_id),int(store_id)))
+
+
 def require_admin(user):
     if not user or user.get('role') != 'admin':
         raise ValueError('Cette action est réservée à l’administrateur.')

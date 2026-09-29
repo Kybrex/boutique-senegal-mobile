@@ -86,6 +86,18 @@ class LifecycleUiTests(unittest.TestCase):
         self.assertEqual(len(self.app.button),0)
         self.assertEqual(len(self.app.text_input),0)
 
+    def test_management_with_legacy_no_argument_products(self):
+        from product_lifecycle import set_archived
+        current_products=db.products
+        with patch.object(db,'products',side_effect=lambda:current_products()):
+            self.app.run()
+            self.assertFalse(self.app.exception)
+            set_archived({'id':1,'role':'admin'},1,True,'Fin de gamme')
+            self.app.run()
+            widget(self.app.radio,'Afficher').set_value('Produits archivés').run()
+            self.assertFalse(self.app.exception)
+            self.assertIsNotNone(widget(self.app.button,'Restaurer le produit'))
+
     def test_real_mobile_and_desktop_product_sections(self):
         for filename,start_marker,end_marker in [
             ('iphone_app.py','elif page == "Produits":','elif page == "Achats":'),
