@@ -311,7 +311,7 @@ def save_inventory_count(product_id: int, counted: int, user_id: int, notes: str
             raise ValueError("Indiquez le motif de l’écart avant de corriger le stock.")
         conn.execute("UPDATE products SET stock=? WHERE id=?", (counted,product_id))
         conn.execute("INSERT INTO store_stock(store_id,product_id,stock) VALUES(1,?,?) ON CONFLICT(store_id,product_id) DO UPDATE SET stock=excluded.stock", (product_id,counted))
-        conn.execute("INSERT INTO inventory_counts(product_id,expected_stock,counted_stock,difference,counted_by,notes) VALUES(?,?,?,?,?,?)", (product_id,expected,counted,user_id,notes.strip())); conn.commit()
+        conn.execute("INSERT INTO inventory_counts(product_id,expected_stock,counted_stock,difference,counted_by,notes) VALUES(?,?,?,?,?,?)", (product_id,expected,counted,difference,user_id,notes.strip())); conn.commit()
 def inventory_history() -> pd.DataFrame:
     return query("SELECT i.created_at AS Date,p.name AS Produit,i.expected_stock AS Stock_systeme,i.counted_stock AS Stock_compte,i.difference AS Ecart,i.notes AS Notes FROM inventory_counts i LEFT JOIN products p ON p.id=i.product_id ORDER BY i.created_at DESC LIMIT 200")
 def stores() -> pd.DataFrame: return query("SELECT id,name AS Boutique,address AS Adresse,phone AS Telephone FROM stores WHERE active=1 ORDER BY name")
