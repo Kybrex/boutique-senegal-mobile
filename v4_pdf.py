@@ -27,14 +27,17 @@ def make_barcode_labels_pdf(products: pd.DataFrame, settings: dict | None = None
     class Label(Flowable):
         def __init__(self,row): super().__init__(); self.row=row; self.width=63*mm; self.height=32*mm
         def draw(self):
-            name=str(self.row.get("Produit", ""))[:35]; barcode=str(self.row.get("Code_barres", "") or self.row.get("id", "")); price=_money(self.row.get("Vente",0))
+            name=str(self.row.get("Produit", ""))[:35]; barcode=str(self.row.get("Code_barres", "") or "").strip(); price=_money(self.row.get("Vente",0))
             c=self.canv; c.setStrokeColor(colors.HexColor("#BBBBBB")); c.rect(0,0,self.width,self.height)
             c.setFont("Helvetica-Bold",8); c.drawCentredString(self.width/2,self.height-7*mm,name)
             if barcode:
                 symbol=code128.Code128(barcode,barHeight=10*mm,barWidth=.28*mm); symbol.drawOn(c,(self.width-symbol.width)/2,7*mm)
                 c.setFont("Helvetica",6); c.drawCentredString(self.width/2,4*mm,barcode)
             c.setFont("Helvetica-Bold",9); c.drawCentredString(self.width/2,1.3*mm,price)
-    cells=[Label(r) for _,r in products.iterrows()]
+    codes = products["Code_barres"].fillna("").astype(str).str.strip() if "Code_barres" in products.columns else pd.Series("", index=products.index)
+    printable = products.loc[codes.ne("")].copy()
+    printable["Code_barres"] = codes.loc[codes.ne("")]
+    cells=[Label(r) for _,r in printable.iterrows()]
     while len(cells)%3: cells.append("")
     rows=[cells[i:i+3] for i in range(0,len(cells),3)] or [[""]]
     table=Table(rows,colWidths=[65*mm]*3,rowHeights=[34*mm]*len(rows)); table.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"),("ALIGN",(0,0),(-1,-1),"CENTER")]))

@@ -363,8 +363,11 @@ def inventory_snapshot():
 def save_inventory_count(product_id, counted, user_id, notes=""):
     product=_one("products",id=product_id)
     if product is None or counted < 0: raise ValueError("Comptage invalide.")
-    expected=int(product["stock"]); set_stock(product_id,counted)
-    _table("inventory_counts").insert({"product_id":product_id,"expected_stock":expected,"counted_stock":counted,"difference":counted-expected,"counted_by":user_id,"notes":notes.strip()}).execute()
+    expected=int(product["stock"])
+    if int(counted) != expected and not str(notes or "").strip():
+        raise ValueError("Indiquez le motif de l’écart avant de corriger le stock.")
+    set_stock(product_id,counted)
+    _table("inventory_counts").insert({"product_id":product_id,"expected_stock":expected,"counted_stock":counted,"difference":counted-expected,"counted_by":user_id,"notes":str(notes or "").strip()}).execute()
 def inventory_history():
     rows=_data(_table("inventory_counts").select("*,products(name)").order("created_at",desc=True).limit(200).execute())
     return _frame([{"Date":r["created_at"],"Produit":(r.get("products") or {}).get("name",""),"Stock_systeme":r["expected_stock"],"Stock_compte":r["counted_stock"],"Ecart":r["difference"],"Notes":r.get("notes","")} for r in rows], ["Date","Produit","Stock_systeme","Stock_compte","Ecart","Notes"])
