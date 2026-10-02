@@ -10,4 +10,14 @@ Les montants payés et restes reflètent l’état actuel des ventes de la péri
 
 Les rapports de ventes et dépenses Supabase chargent maintenant toutes les pages de résultats, avec des limites de dates appliquées à la requête et un tri stable.
 
+## Imprimer et exporter en PDF
+
+Les écrans Historique, Rapports et Factures proposent **Imprimer / exporter les ventes en PDF**. Le document reprend uniquement les ventes actuellement sélectionnées, la période, les filtres, les totaux, les montants payés, les restes et l’état de paiement. La liste de facturation est un relevé des ventes ; chaque facture individuelle reste émise et archivée par le circuit habituel.
+
+Les analyses de l’accueil et du tableau de bord propriétaire disposent de **Imprimer / exporter le tableau de bord en PDF**, avec les indicateurs, la comparaison de périodes, le graphique quotidien et les répartitions par paiement et vendeur.
+
+Téléchargez le PDF, ouvrez-le puis choisissez **Imprimer** : Ctrl+P sur ordinateur, ou Partager → Imprimer sur iPhone. Pour les factures individuelles archivées, choisissez le format A4 ou A5 puis imprimez à taille réelle. Les documents comportent le logo, les coordonnées de la boutique, la pagination et des en-têtes répétés sur les longues listes.
+
+Validation PDF : 5 tests supplémentaires couvrent les listes filtrées, les périodes comparées, les données vides, les longues listes et les boutons Streamlit. Les exemples de contrôle ont aussi été rendus en images et vérifiés visuellement.
+
 Validation : 7 tests automatiques de filtres, calculs, périodes, pagination de 1 201 ventes et interaction Streamlit. Les suites existantes de facturation, gestion quotidienne et stockage cloud passent également. La validation utilise des données de test, sans modifier les données de production.

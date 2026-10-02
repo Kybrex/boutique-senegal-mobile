@@ -60,7 +60,7 @@ rows=ui.filters(sample(), 'test')
 st.dataframe(rows)
 ui.dashboard(date(2026,10,1), date(2026,10,3), 'test')
 '''
-        with patch('db.report', return_value=sample()):
+        with patch('db.report', return_value=sample()), patch('db.v2_ready', return_value=False):
             app=AppTest.from_string(source,default_timeout=20).run()
             self.assertFalse(app.exception)
             app.text_input[0].set_value('emilie').run()

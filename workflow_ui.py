@@ -24,8 +24,8 @@ def invoice_downloads(envelope, user, key):
     st.caption(f"Original conservé le {meta['created_at'][:19].replace('T',' ')} · {meta['number']}")
     fmt = st.radio('Format d’impression', ['A4','A5'], horizontal=True, key=key+'_format')
     pdf, name, mime = service.unpack_file(envelope, fmt)
-    st.download_button('Télécharger la facture PDF', pdf, file_name=name, mime=mime, key=key+'_download')
-    st.caption(f'Ouvrez le PDF et choisissez le papier {fmt}, à taille réelle (100 %).')
+    st.download_button('Imprimer / exporter la facture en PDF', pdf, file_name=name, mime=mime, key=key+'_download')
+    st.caption(f'Ouvrez le PDF puis choisissez Imprimer (Ctrl+P ou Partager → Imprimer sur iPhone), papier {fmt}, à taille réelle (100 %).')
     with st.expander('Préparer un envoi WhatsApp'):
         st.caption('Téléchargez le PDF ci-dessus. Le message s’ouvrira dans WhatsApp ; joignez le PDF puis confirmez l’envoi là-bas.')
         phone = st.text_input('Numéro WhatsApp du destinataire', value=str(meta.get('phone') or ''), key=key+'_phone')

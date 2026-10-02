@@ -2,6 +2,7 @@
 import streamlit as st
 import db
 import sales_insights as insights
+import sales_insights_pdf as pdf
 
 def fcfa(value):
     return f'{value:,.0f} FCFA'.replace(',', ' ')
@@ -14,6 +15,16 @@ def filters(sales, key):
     result = insights.filter_sales(sales, search, state, method, seller)
     st.caption(f'{len(result)} vente(s) trouvée(s)')
     return result
+
+def print_help():
+    st.caption('Pour imprimer : téléchargez le PDF, ouvrez-le puis choisissez Imprimer (Ctrl+P sur ordinateur ou Partager → Imprimer sur iPhone).')
+
+def sales_export(sales, start, end, key, title='Liste des ventes'):
+    labels = [('search', 'Recherche'), ('state', 'État'), ('method', 'Mode'), ('seller', 'Vendeur')]
+    selected = ' · '.join(f'{label} : {st.session_state.get(f"{key}_{field}", "Tous")}' for field, label in labels)
+    document = pdf.sales_pdf(sales, start, end, title, selected, db.get_settings() if db.v2_ready() else {})
+    st.download_button('Imprimer / exporter les ventes en PDF', document, file_name=f'ventes_{start}_{end}.pdf', mime='application/pdf', key=f'{key}_pdf', icon=':material/picture_as_pdf:')
+    print_help()
 
 def dashboard(start, end, key):
     previous_start, previous_end = insights.previous_period(start, end)
@@ -34,3 +45,6 @@ def dashboard(start, end, key):
     st.subheader('Ventes par vendeur')
     st.dataframe(current['sellers'], hide_index=True, width='stretch')
     st.download_button('Exporter les ventes quotidiennes', current['daily'].to_csv().encode('utf-8-sig'), file_name=f'ventes_quotidiennes_{start}_{end}.csv', mime='text/csv', key=f'{key}_export')
+    document = pdf.dashboard_pdf(current, previous, start, end, db.get_settings() if db.v2_ready() else {})
+    st.download_button('Imprimer / exporter le tableau de bord en PDF', document, file_name=f'tableau_de_bord_{start}_{end}.pdf', mime='application/pdf', key=f'{key}_pdf', icon=':material/picture_as_pdf:')
+    print_help()
