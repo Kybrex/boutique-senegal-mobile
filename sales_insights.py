@@ -25,6 +25,7 @@ def filter_sales(sales, search='', state='Tous', method='Tous', seller='Tous'):
     if state != 'Tous': result = result.loc[result.Etat.eq(state)]
     if method != 'Tous': result = result.loc[result.Paiement.eq(method)]
     if seller != 'Tous': result = result.loc[result.Vendeur.eq(seller)]
+    if result.empty: return result
     term = normalize(search.strip().lstrip('#'))
     if term:
         mask = result.Client.fillna('').map(normalize).str.contains(term, regex=False)

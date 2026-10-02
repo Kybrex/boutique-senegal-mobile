@@ -18,6 +18,7 @@ class InsightsTests(TestCase):
         self.assertEqual(insights.filter_sales(sample(), 'emilie').Ticket.tolist(), [12])
         self.assertEqual(insights.filter_sales(sample(), '#13', 'Partiellement payée', 'Espèces', 'Awa').Ticket.tolist(), [13])
         self.assertTrue(insights.filter_sales(sample(), state='Non payée', seller='Awa').empty)
+        self.assertTrue(insights.filter_sales(sample(), 'emilie', state='Non payée', seller='Awa').empty)
     def test_payment_states_and_remainders(self):
         rows = insights.prepare(sample())
         self.assertEqual(rows.Reste.tolist(), [0, 1500, 3000])
