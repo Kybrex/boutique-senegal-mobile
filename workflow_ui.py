@@ -132,6 +132,8 @@ def client_page(user):
         a.metric('Achats',money(profile['total']))
         b.metric('Reste à payer',money(profile['debt']))
         c.metric('Avoir disponible',money(client.get('store_credit') or 0))
+        from monthly_management_ui import client_actions
+        client_actions(profile,user)
         tab = st.radio('Consulter',['Achats','Paiements','Dettes','Documents'],horizontal=True,key='client_detail_tab')
         if tab in ('Achats','Dettes'):
             rows = [{'Vente':r['id'],'Date':r['created_at'],'Total':float(r['total']), 'Payé':float(r['paid']),
