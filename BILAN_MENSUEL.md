@@ -20,6 +20,8 @@ Dans **Clients → Relances WhatsApp**, choisissez une relance par vente échue 
 
 ## Bilan mensuel PDF
 
+La page **Tableau de bord → Bénéfice** propose également **Imprimer / exporter le bilan et bénéfice en PDF** pour toute période choisie. Ce document reprend les ventes après remises, coûts, marge brute, charges, commissions, bénéfice net estimé et détail des dépenses. Deux tests supplémentaires valident son contenu et le bouton dans Streamlit.
+
 Le bouton du bilan exporte les ventes, coûts, charges, commissions, résultat estimé, objectif, produits vendus, stock sans vente, dépenses et impayés. Les créances et le stock représentent la situation actuelle, même pour un ancien mois. Le document est daté, comporte le logo et les coordonnées, et peut être imprimé depuis le lecteur PDF.
 
 Les nouvelles fonctions sont réservées aux administrateurs. Aucune migration SQL n’est nécessaire.
