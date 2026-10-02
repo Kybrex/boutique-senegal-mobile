@@ -85,7 +85,7 @@ def profit_page(user):
     features.require_admin(user)
     st.header('Bénéfice de la boutique')
     period = st.date_input('Période du bénéfice', value=(date.today().replace(day=1), date.today()))
-    if len(period) != 2:
+    if not isinstance(period, (tuple,list)) or len(period) != 2:
         st.info('Choisissez le début et la fin de la période.')
         return
     result = features.profit_summary(*period)
@@ -107,6 +107,10 @@ def profit_page(user):
     summary = pd.DataFrame([{'Indicateur':k,'FCFA':result[k]} for k in ['revenue','cost','gross','operating','commissions','net']])
     summary['Indicateur'] = ['Ventes après remises','Coût des articles vendus','Marge brute','Dépenses de fonctionnement','Commissions','Résultat estimé']
     st.download_button('Exporter le bilan', summary.to_csv(index=False).encode('utf-8-sig'), file_name='bilan_benefice.csv', mime='text/csv')
+    from monthly_management_pdf import profit_pdf
+    from sales_insights_ui import print_help
+    st.download_button('Imprimer / exporter le bilan et bénéfice en PDF',profit_pdf(result,*period,db.get_settings()),file_name=f'bilan_benefice_{period[0]}_{period[1]}.pdf',mime='application/pdf',key='profit_pdf')
+    print_help()
 
 
 def reorder_page(user):
@@ -213,4 +217,3 @@ def backups_page(user):
                     st.success(f"Récupération terminée : {sum(int(v) for v in restored.values())} enregistrements ajoutés.")
                 except Exception:
                     st.error('La récupération a été interrompue. Certaines données peuvent avoir été récupérées ; vérifiez la connexion avant de réessayer.')
-

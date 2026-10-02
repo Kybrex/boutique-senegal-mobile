@@ -6,6 +6,20 @@ from reportlab.platypus import Paragraph, Spacer
 from sales_journal import _pdf
 from sales_insights_pdf import section, money, NOTE
 
+def profit_pdf(result,start,end,settings=None):
+    styles=getSampleStyleSheet()
+    rows=[['Ventes après remises',result['revenue']],['Coût des articles vendus',result['cost']],
+          ['Marge brute',result['gross']],['Dépenses de fonctionnement',result['operating']],
+          ['Commissions',result['commissions']],['Bénéfice net estimé',result['net']],
+          ['Achats et règlements de stock (hors charges)',result['stock_payments']]]
+    story=section('Bilan du bénéfice (FCFA)',['Indicateur','Montant'],[[label,money(value)] for label,value in rows],[340,190])
+    story += [Spacer(1,10),Paragraph('Résultat = ventes après remises - coût des articles vendus - dépenses de fonctionnement - commissions. Les achats de stock et règlements fournisseurs ne sont pas déduits une seconde fois. Les ventes à crédit sont incluses ; ce résultat n’est pas le solde de caisse.',styles['Normal'])]
+    story += [Spacer(1,8),Paragraph(f'Situation calculée au {date.today():%d/%m/%Y}. Le résultat dépend des coûts et charges enregistrés ; les corrections et retours peuvent modifier une ancienne période.',styles['Normal'])]
+    if result['estimated']:
+        story += [Spacer(1,8),Paragraph(f"{result['estimated']} ligne(s) sans coût historique utilisent le prix d’achat actuel.",styles['Normal'])]
+    story += section('Dépenses et traitement',['Date','Libellé','Montant (FCFA)','Traitement'],[[str(r['Date'])[:10],r['Libellé'],money(r['Montant']),r['Traitement']] for _,r in result['expenses'].iterrows()],[70,180,100,180])
+    return _pdf('Bilan et bénéfice de la boutique',f'Du {start:%d/%m/%Y} au {end:%d/%m/%Y}',story,settings)
+
 def monthly_pdf(data,settings=None):
     profit=data['profit'];start,end=data['start'],data['end'];styles=getSampleStyleSheet()
     rows=[['Ventes',profit['revenue']],['Coût des produits vendus',profit['cost']],['Bénéfice brut',profit['gross']],

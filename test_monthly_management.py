@@ -111,3 +111,14 @@ class MonthlyTests(TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(app.metric[0].value,'1 300 FCFA')
         self.assertEqual(len(app.get('download_button')),2)
+    def test_profit_pdf_includes_totals_and_expenses(self):
+        result=features.profit_summary(date(2026,10,1),date(2026,10,31))
+        text='\n'.join(p.extract_text() for p in PdfReader(BytesIO(pdf.profit_pdf(result,date(2026,10,1),date(2026,10,31)))).pages)
+        for term in ('Bilan et bénéfice','Bénéfice net estimé','500','Transport','01/10/2026','31/10/2026'):
+            self.assertIn(term,text)
+        self.assertIn('pas le solde de caisse',text)
+    def test_profit_page_pdf_button(self):
+        app=AppTest.from_string('import business_features_ui as ui\nui.profit_page('+repr(self.user)+')',default_timeout=25).run()
+        self.assertFalse(app.exception)
+        labels=[button.label for button in app.get('download_button')]
+        self.assertIn('Imprimer / exporter le bilan et bénéfice en PDF',labels)
