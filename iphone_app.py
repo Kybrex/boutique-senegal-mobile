@@ -612,6 +612,7 @@ elif page in ("Rapports", "Historique"):
         st.metric("Dépenses", fcfa(total_expenses))
         st.metric("Ventes sélectionnées moins dépenses", fcfa(total_sales-total_expenses))
     st.dataframe(sales, hide_index=True)
+    sales_insights_ui.sales_export(sales, start, end, "history_sales" if page == "Historique" else "report_sales")
     performance = db.product_performance(start, end)
     if not performance.empty:
         st.subheader("Bénéfice et produits vendus", icon=":material/trending_up:")
@@ -721,6 +722,7 @@ elif page == "Factures":
         st.stop()
     sales = db.report(*period)
     sales = sales_insights_ui.filters(sales, "invoice_sales")
+    sales_insights_ui.sales_export(sales, *period, "invoice_sales", title="Ventes pour facturation")
     st.download_button("Exporter la liste des ventes à facturer", sales.to_csv(index=False).encode("utf-8-sig"), file_name=f"ventes_facturation_{period[0]}_{period[1]}.csv", mime="text/csv")
     if sales.empty:
         st.info("Aucune vente sur cette période.")
