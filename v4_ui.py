@@ -161,11 +161,13 @@ def automation_page(user):
 
 def owner_page():
     if migration_required(): return
-    st.header("Tableau de bord propriétaire",icon=":material/leaderboard:")
+    st.header(":material/leaderboard: Tableau de bord propriétaire")
     period=st.date_input("Période",value=(date.today().replace(day=1),date.today()),key="owner_period")
     if not isinstance(period,(tuple,list)) or len(period)!=2: return
     data=v4.owner_dashboard(period[0],period[1])
-    with st.container(border=True): st.metric("Chiffre d'affaires",fcfa(data["sales"])); st.metric("Tickets",data["tickets"]); st.metric("Créances totales",fcfa(data["debt"]))
+    import sales_insights_ui
+    sales_insights_ui.dashboard(period[0], period[1], "owner_analysis")
+    with st.container(border=True): st.metric("Créances totales",fcfa(data["debt"]))
     st.subheader("Comparaison des boutiques"); st.dataframe(data["stores"],hide_index=True,width="stretch")
     st.subheader("Comparaison des vendeurs"); st.dataframe(data["commissions"],hide_index=True,width="stretch")
     st.subheader("Produits à réapprovisionner"); st.dataframe(data["forecast"].head(20),hide_index=True,width="stretch")

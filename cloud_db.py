@@ -1,7 +1,7 @@
 """Implémentation Supabase de la couche de données Boutique Senegal."""
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 import pandas as pd
 
@@ -183,10 +183,18 @@ def today_summary() -> pd.DataFrame:
     rows = _data(_table("sales").select("total,created_at").execute()); today = date.today().isoformat(); values = [float(r["total"]) for r in rows if r["created_at"].startswith(today)]
     return _frame([{ "sales": sum(values), "transactions": len(values) }])
 def report(start, end) -> pd.DataFrame:
-    rows = _data(_table("sales").select("*,sellers(name),clients(name)").order("created_at", desc=True).execute())
+    rows = _period_rows("sales", "*,sellers(name),clients(name)", start, end)
     return _frame([{ "Ticket": r["id"], "Date": r["created_at"], "Vendeur": (r.get("sellers") or {}).get("name", "Inconnu"), "Client": (r.get("clients") or {}).get("name", "Comptant"), "Total": r["total"], "Reduction": r["discount"], "Encaisse": r["paid"], "Paiement": r["payment_method"] } for r in rows if start.isoformat() <= r["created_at"][:10] <= end.isoformat()])
 def expenses(start, end) -> pd.DataFrame:
-    return _frame([{ "Date": r["created_at"], "Libelle": r["label"], "Montant": r["amount"] } for r in _data(_table("expenses").select("*").order("created_at", desc=True).execute()) if start.isoformat() <= r["created_at"][:10] <= end.isoformat()])
+    return _frame([{ "Date": r["created_at"], "Libelle": r["label"], "Montant": r["amount"] } for r in _period_rows("expenses", "*", start, end) if start.isoformat() <= r["created_at"][:10] <= end.isoformat()])
+
+def _period_rows(table, columns, start, end):
+    if end < start: raise ValueError("Période invalide.")
+    rows = []
+    while True:
+        page = _data(_table(table).select(columns).gte("created_at", start.isoformat()).lt("created_at", (end + timedelta(days=1)).isoformat()).order("created_at", desc=True).order("id", desc=True).range(len(rows), len(rows) + 499).execute())
+        rows.extend(page)
+        if not page: return rows
 
 
 def sale_details(sale_id):

@@ -59,6 +59,7 @@ import workflow_service as workflows
 import workflow_ui
 import session_guard
 import sales_journal
+import sales_insights_ui
 
 db.init_db()
 st.session_state.setdefault("mobile_cart", [])
@@ -248,6 +249,10 @@ elif page == "Accueil":
         if not expiry.empty:
             st.subheader("Lots à surveiller",icon=":material/event_busy:"); st.dataframe(expiry,hide_index=True,width="stretch")
     st.download_button("Imprimer le tableau de bord en PDF", sales_journal.dashboard_pdf(date.today(), float(summary.sales), int(summary.transactions), alerts, purchase_total, db.credit_alerts() if db.v2_ready() else pd.DataFrame(), db.get_settings() if db.v2_ready() else {}), file_name=f"tableau_de_bord_{date.today():%Y-%m-%d}.pdf", mime="application/pdf", icon=":material/picture_as_pdf:")
+    with st.expander("Analyser les ventes sur une période"):
+        analysis_period = st.date_input("Période à analyser", value=(date.today().replace(day=1), date.today()), key="home_analysis_period")
+        if isinstance(analysis_period, (tuple, list)) and len(analysis_period) == 2:
+            sales_insights_ui.dashboard(*analysis_period, key="home_analysis")
 
 elif page == "Journal ventes":
     st.header("Journal des ventes", icon=":material/receipt_long:")
@@ -597,13 +602,15 @@ elif page in ("Rapports", "Historique"):
         st.stop()
     start, end = period
     sales = db.report(start, end)
+    if page == "Historique":
+        sales = sales_insights_ui.filters(sales, "history_sales")
     expenses = db.expenses(start, end)
     total_sales = float(sales.Total.sum()) if not sales.empty else 0.0
     total_expenses = float(expenses.Montant.sum()) if not expenses.empty else 0.0
     with st.container(border=True):
         st.metric("Ventes", fcfa(total_sales))
         st.metric("Dépenses", fcfa(total_expenses))
-        st.metric("Solde", fcfa(total_sales-total_expenses))
+        st.metric("Ventes sélectionnées moins dépenses", fcfa(total_sales-total_expenses))
     st.dataframe(sales, hide_index=True)
     performance = db.product_performance(start, end)
     if not performance.empty:
@@ -709,10 +716,12 @@ elif page == "Factures":
     from business_pdf import make_business_document_pdf
     st.caption("Téléchargez une facture à partir d'une vente enregistrée, sans ressaisir les produits.")
     period = st.date_input("Période des ventes", value=(date.today().replace(day=1), date.today()))
-    if len(period) != 2:
+    if not isinstance(period, (tuple, list)) or len(period) != 2:
         st.info("Sélectionnez une date de début et une date de fin.")
         st.stop()
     sales = db.report(*period)
+    sales = sales_insights_ui.filters(sales, "invoice_sales")
+    st.download_button("Exporter la liste des ventes à facturer", sales.to_csv(index=False).encode("utf-8-sig"), file_name=f"ventes_facturation_{period[0]}_{period[1]}.csv", mime="text/csv")
     if sales.empty:
         st.info("Aucune vente sur cette période.")
     else:
