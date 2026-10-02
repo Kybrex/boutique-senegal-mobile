@@ -142,7 +142,7 @@ if is_admin and v4.v4_ready() and not st.session_state.get("v4_session_tasks_don
 
 # Seven everyday sections. Existing internal routes remain compatible with documents.
 sections = {
-    "Tableau de bord": [("Accueil", "Vue d'ensemble"), ("Rapports", "Rapports et dépenses"), ("Bénéfice", "Bénéfice")],
+    "Tableau de bord": [("Accueil", "Vue d'ensemble"), ("Rapports", "Rapports et dépenses"), ("Bénéfice", "Bénéfice"), ("Bilan mensuel", "Bilan et objectifs")],
     "Ventes": [("Caisse", "Nouvelle vente"), ("Historique", "Historique"), ("Journal ventes", "Journal des ventes"), ("Retours V3", "Retours et échanges"), ("Clôture", "Caisse journalière"), ("Paiements", "Paiements par mode")],
     "Achats": [("Achats", "Achat reçu"), ("Commandes", "Commandes et règlements"), ("Justificatifs", "Justificatifs")],
     "Stock": [("Produits", "Produits et quantités"), ("Inventaire", "Inventaire"), ("Réapprovisionnement", "À commander"), ("Impression", "Codes-barres et impressions")],
@@ -216,6 +216,9 @@ elif page == "Justificatifs":
     workflow_ui.attachments_page(user)
 elif page == "Fiche client":
     workflow_ui.client_page(user)
+elif page == "Bilan mensuel":
+    import monthly_management_ui
+    monthly_management_ui.monthly_page(user)
 elif page == "Accueil":
     workflow_ui.backup_reminder(user)
     summary = db.today_summary().iloc[0]

@@ -106,6 +106,11 @@ def cash_page(user):
 def reminders_page(user):
     f.require_admin(user)
     st.header('Relances clients')
+    mode=st.radio('Type de relance',['Par vente arrivée à échéance','Par client : tous les impayés'],key='reminder_scope')
+    if mode=='Par client : tous les impayés':
+        from monthly_management_ui import grouped_reminders
+        grouped_reminders(user)
+        return
     debts=f.debt_rows('clients')
     due=debts[debts.Situation.isin(['À échéance','En retard'])]
     if due.empty:
